@@ -621,7 +621,7 @@ mlmm_hellaswag_tasks = [
         ),
         hf_repo="jon-tow/okapi_hellaswag",
         hf_subset=standardize_tag(lang.value),
-        hf_revision="96ed8e0dfc6172dad1d3df338d7b8ba6c1ff9d83",
+        hf_revision="e5e8c0e0d389f100a7e3af5c3e8f2993b0c1ed86",
         evaluation_splits=["validation"],
         hf_avail_splits=["validation"],
         metrics=get_metrics_for_formulation(
@@ -834,7 +834,7 @@ xquad_tasks = [
         evaluation_splits=("validation",),
         few_shots_split="validation",
         generation_size=400,
-        stop_sequence=("\n",),
+        stop_sequence=["\n"],
         metrics=(
             MultilingualQuasiExactMatchMetric(language, "prefix"),
             MultilingualQuasiF1ScoreMetric(language),
@@ -877,7 +877,7 @@ germanquad_tasks = [
         evaluation_splits=("test",),
         few_shots_split="train",
         generation_size=400,
-        stop_sequence=("\n",),
+        stop_sequence=["\n"],
         metrics=(
             MultilingualQuasiExactMatchMetric(Language.GERMAN, "prefix"),
             MultilingualQuasiF1ScoreMetric(Language.GERMAN),
@@ -906,7 +906,7 @@ squad_it_tasks = [
         evaluation_splits=("test",),
         few_shots_split="train",
         generation_size=400,
-        stop_sequence=("\n",),
+        stop_sequence=["\n"],
         metrics=(
             MultilingualQuasiExactMatchMetric(Language.ITALIAN, "prefix"),
             MultilingualQuasiF1ScoreMetric(Language.ITALIAN),
@@ -933,7 +933,7 @@ thaiqa_tasks = [
         evaluation_splits=("train",),
         few_shots_split="validation",
         generation_size=400,
-        stop_sequence=("\n",),
+        stop_sequence=["\n"],
         metrics=(
             MultilingualQuasiExactMatchMetric(Language.THAI, "prefix"),
             MultilingualQuasiF1ScoreMetric(Language.THAI),
@@ -964,7 +964,7 @@ sber_squad_tasks = [
             MultilingualQuasiF1ScoreMetric(Language.RUSSIAN),
         ),
         generation_size=400,
-        stop_sequence=("\n",),
+        stop_sequence=["\n"],
     )
 ]
 
@@ -993,7 +993,7 @@ faquad_tasks = [
             MultilingualQuasiF1ScoreMetric(Language.PORTUGUESE),
         ),
         generation_size=400,
-        stop_sequence=("\n",),
+        stop_sequence=["\n"],
     )
 ]
 
@@ -1022,7 +1022,7 @@ squad_es_tasks = [
             MultilingualQuasiF1ScoreMetric(Language.SPANISH),
         ),
         generation_size=400,
-        stop_sequence=("\n",),
+        stop_sequence=["\n"],
     )
 ]
 
@@ -1050,7 +1050,7 @@ arcd_tasks = [
             MultilingualQuasiF1ScoreMetric(Language.ARABIC),
         ),
         generation_size=400,
-        stop_sequence=("\n",),
+        stop_sequence=["\n"],
     )
 ]
 
@@ -1077,7 +1077,7 @@ kenswquad_tasks = [
             MultilingualQuasiF1ScoreMetric(Language.SWAHILI),
         ),
         generation_size=400,
-        stop_sequence=("\n",),
+        stop_sequence=["\n"],
     )
 ]
 
@@ -1104,7 +1104,7 @@ chinese_squad_tasks = [
             MultilingualQuasiF1ScoreMetric(Language.CHINESE),
         ),
         generation_size=400,
-        stop_sequence=("\n",),
+        stop_sequence=["\n"],
     )
 ]
 
@@ -1131,7 +1131,7 @@ cmrc2018_tasks = [
             MultilingualQuasiExactMatchMetric(Language.CHINESE, "prefix"),
             MultilingualQuasiF1ScoreMetric(Language.CHINESE),
         ),
-        stop_sequence=("\n",),
+        stop_sequence=["\n"],
     )
 ]
 
@@ -1160,7 +1160,7 @@ indicqa_tasks = [
             MultilingualQuasiExactMatchMetric(language, "prefix"),
             MultilingualQuasiF1ScoreMetric(language),
         ),
-        stop_sequence=("\n",),
+        stop_sequence=["\n"],
     )
     for language in [
         Language.ASSAMESE,
@@ -1196,7 +1196,7 @@ fquad_v2_tasks = [
         evaluation_splits=("test_hasAns",),
         few_shots_split="valid_hasAns",
         generation_size=400,
-        stop_sequence=("\n",),
+        stop_sequence=["\n"],
         metrics=(
             MultilingualQuasiExactMatchMetric(Language.FRENCH, "prefix"),
             MultilingualQuasiF1ScoreMetric(Language.FRENCH),
@@ -1222,7 +1222,7 @@ tquad_v2_tasks = [
         evaluation_splits=("validation",),
         few_shots_split="train",
         generation_size=400,
-        stop_sequence=("\n",),
+        stop_sequence=["\n"],
         metrics=(
             MultilingualQuasiExactMatchMetric(Language.TURKISH, "prefix"),
             MultilingualQuasiF1ScoreMetric(Language.TURKISH),
@@ -1251,7 +1251,7 @@ tydiqa_tasks = [
         evaluation_splits=("validation",),
         few_shots_split="train",
         generation_size=400,
-        stop_sequence=("\n",),
+        stop_sequence=["\n"],
         metrics=(
             MultilingualQuasiExactMatchMetric(language, "prefix"),
             MultilingualQuasiF1ScoreMetric(language),
@@ -1386,7 +1386,7 @@ mlqa_tasks = [
         evaluation_splits=("test",),
         hf_avail_splits=["test"],
         generation_size=400,
-        stop_sequence=("\n",),
+        stop_sequence=["\n"],
         metrics=[
             MultilingualQuasiExactMatchMetric(lang, "prefix"),
             MultilingualQuasiF1ScoreMetric(lang),
@@ -1681,7 +1681,7 @@ meta_mmlu_tasks = [
             [
                 LogLikelihoodAccMetric(normalization=LogProbTokenNorm()),
                 LogLikelihoodAccMetric(normalization=LogProbCharNorm()),
-                LogLikelihoodAccMetric(normalization=LogProbPMINorm()),
+                # LogLikelihoodAccMetric(normalization=LogProbPMINorm()),
             ],
         ),
     )
@@ -1728,7 +1728,7 @@ mlmm_mmlu_tasks = [
             [
                 LogLikelihoodAccMetric(normalization=LogProbTokenNorm()),
                 LogLikelihoodAccMetric(normalization=LogProbCharNorm()),
-                LogLikelihoodAccMetric(normalization=LogProbPMINorm()),
+                # LogLikelihoodAccMetric(normalization=LogProbPMINorm()),
             ],
         ),
     )
@@ -1792,7 +1792,7 @@ openai_mmlu_tasks = [
             [
                 LogLikelihoodAccMetric(normalization=LogProbTokenNorm()),
                 LogLikelihoodAccMetric(normalization=LogProbCharNorm()),
-                LogLikelihoodAccMetric(normalization=LogProbPMINorm()),
+                # LogLikelihoodAccMetric(normalization=LogProbPMINorm()),
             ],
         ),
     )
@@ -1857,7 +1857,7 @@ global_mmlu_tasks = [
             [
                 LogLikelihoodAccMetric(normalization=LogProbTokenNorm()),
                 LogLikelihoodAccMetric(normalization=LogProbCharNorm()),
-                LogLikelihoodAccMetric(normalization=LogProbPMINorm()),
+                # LogLikelihoodAccMetric(normalization=LogProbPMINorm()),
             ],
         ),
     )
@@ -1943,7 +1943,7 @@ afri_mmlu_tasks = [
             [
                 LogLikelihoodAccMetric(normalization=LogProbTokenNorm()),
                 LogLikelihoodAccMetric(normalization=LogProbCharNorm()),
-                LogLikelihoodAccMetric(normalization=LogProbPMINorm()),
+                # LogLikelihoodAccMetric(normalization=LogProbPMINorm()),
             ],
         ),
     )
@@ -1999,7 +1999,7 @@ rummlu = [
             [
                 LogLikelihoodAccMetric(normalization=LogProbTokenNorm()),
                 LogLikelihoodAccMetric(normalization=LogProbCharNorm()),
-                LogLikelihoodAccMetric(normalization=LogProbPMINorm()),
+                # LogLikelihoodAccMetric(normalization=LogProbPMINorm()),
             ],
         ),
     )
@@ -2031,7 +2031,7 @@ mmlu_turkish = [
             [
                 LogLikelihoodAccMetric(normalization=LogProbTokenNorm()),
                 LogLikelihoodAccMetric(normalization=LogProbCharNorm()),
-                LogLikelihoodAccMetric(normalization=LogProbPMINorm()),
+                # LogLikelihoodAccMetric(normalization=LogProbPMINorm()),
             ],
         ),
     )
@@ -2138,7 +2138,7 @@ cmmlu_tasks = [
             [
                 LogLikelihoodAccMetric(normalization=LogProbTokenNorm()),
                 LogLikelihoodAccMetric(normalization=LogProbCharNorm()),
-                LogLikelihoodAccMetric(normalization=LogProbPMINorm()),
+                # LogLikelihoodAccMetric(normalization=LogProbPMINorm()),
             ],
         ),
     )
@@ -2219,7 +2219,7 @@ arabic_mmlu_tasks = [
             [
                 LogLikelihoodAccMetric(normalization=LogProbTokenNorm()),
                 LogLikelihoodAccMetric(normalization=LogProbCharNorm()),
-                LogLikelihoodAccMetric(normalization=LogProbPMINorm()),
+                # LogLikelihoodAccMetric(normalization=LogProbPMINorm()),
             ],
         ),
     )
@@ -2266,7 +2266,7 @@ turkish_mmlu_tasks = [
             [
                 LogLikelihoodAccMetric(normalization=LogProbTokenNorm()),
                 LogLikelihoodAccMetric(normalization=LogProbCharNorm()),
-                LogLikelihoodAccMetric(normalization=LogProbPMINorm()),
+                # LogLikelihoodAccMetric(normalization=LogProbPMINorm()),
             ],
         ),
     )
@@ -2320,9 +2320,8 @@ mlmm_arc_challenge_tasks = [
             formulation=formulation,
         ),
         suite=("lighteval",),
-        hf_repo="jon-tow/okapi_arc_challenge",
+        hf_repo="lighteval/okapi_arc_challenge",
         hf_subset=standardize_tag(language.value),
-        hf_revision="823d5d7bfaf8974a3ab52a825b6cf4903b35dbc4",
         evaluation_splits=("test",),
         few_shots_split="train",
         metrics=get_metrics_for_formulation(
@@ -2330,7 +2329,7 @@ mlmm_arc_challenge_tasks = [
             [
                 LogLikelihoodAccMetric(normalization=LogProbTokenNorm()),
                 LogLikelihoodAccMetric(normalization=LogProbCharNorm()),
-                LogLikelihoodAccMetric(normalization=LogProbPMINorm()),
+                # LogLikelihoodAccMetric(normalization=LogProbPMINorm()),
             ],
         ),
     )
@@ -2423,7 +2422,7 @@ lumi_arc = [
             [
                 LogLikelihoodAccMetric(normalization=LogProbTokenNorm()),
                 LogLikelihoodAccMetric(normalization=LogProbCharNorm()),
-                LogLikelihoodAccMetric(normalization=LogProbPMINorm()),
+                # LogLikelihoodAccMetric(normalization=LogProbPMINorm()),
             ],
         ),
     )
@@ -2995,7 +2994,7 @@ xcsqa_tasks = [
             [
                 LogLikelihoodAccMetric(normalization=LogProbTokenNorm()),
                 LogLikelihoodAccMetric(normalization=LogProbCharNorm()),
-                LogLikelihoodAccMetric(normalization=LogProbPMINorm()),
+                # LogLikelihoodAccMetric(normalization=LogProbPMINorm()),
             ],
         ),
     )
@@ -3279,7 +3278,7 @@ cmath_tasks = [
         metrics=[
             MultilingualQuasiExactMatchMetric(Language.CHINESE, "full"),
         ],
-        stop_sequence=("\n",),
+        stop_sequence=["\n"],
     )
 ]
 
@@ -3304,7 +3303,7 @@ mgsm_tasks = [
         metrics=[
             MultilingualQuasiExactMatchMetric(language, "full"),
         ],
-        stop_sequence=("\n",),
+        stop_sequence=["\n"],
     )
     for language in [
         Language.ENGLISH,
@@ -3343,7 +3342,7 @@ afri_mgsm_tasks = [
         metrics=[
             MultilingualQuasiExactMatchMetric(language, "full"),
         ],
-        stop_sequence=("\n",),
+        stop_sequence=["\n"],
     )
     for language in [
         Language.AMHARIC,
@@ -3415,7 +3414,7 @@ agieval_tasks_zh = [
             [
                 LogLikelihoodAccMetric(normalization=LogProbTokenNorm()),
                 LogLikelihoodAccMetric(normalization=LogProbCharNorm()),
-                LogLikelihoodAccMetric(normalization=LogProbPMINorm()),
+                # LogLikelihoodAccMetric(normalization=LogProbPMINorm()),
             ],
         ),
     )
@@ -3837,7 +3836,7 @@ mkqa_tasks = [
         ),
         evaluation_splits=("train",),
         hf_avail_splits=["train"],
-        stop_sequence=("\n",),
+        stop_sequence=["\n"],
         metrics=[
             MultilingualQuasiExactMatchMetric(language, "prefix"),
             MultilingualQuasiF1ScoreMetric(language),
@@ -3890,11 +3889,14 @@ mintaka_tasks = [
         ),
         suite=("lighteval",),
         hf_repo="AmazonScience/mintaka",
-        hf_subset=standardize_tag(lang.value),
+        hf_revision="fe3f1235e31b01dc9cce913086f0cb6ed0d9b82e",
+        hf_filter=lambda x: x["lang"] == standardize_tag(lang.value),
+        hf_subset="default",
+        # hf_subset=standardize_tag(lang.value),
         evaluation_splits=("test",),
         few_shots_split="train",
         generation_size=400,
-        stop_sequence=("\n",),
+        stop_sequence=["\n"],
         metrics=[
             MultilingualQuasiExactMatchMetric(lang, "prefix"),
             MultilingualQuasiF1ScoreMetric(lang),
@@ -3929,7 +3931,7 @@ french_triviqa_tasks = [
         evaluation_splits=("train",),
         hf_avail_splits=["train"],
         generation_size=400,
-        stop_sequence=("\n",),
+        stop_sequence=["\n"],
         metrics=[
             MultilingualQuasiExactMatchMetric(Language.FRENCH, "prefix"),
             MultilingualQuasiF1ScoreMetric(Language.FRENCH),
@@ -3954,7 +3956,7 @@ chegeka_tasks = [
         evaluation_splits=("train",),
         hf_avail_splits=["train"],
         generation_size=400,
-        stop_sequence=("\n",),
+        stop_sequence=["\n"],
         metrics=[
             MultilingualQuasiExactMatchMetric(Language.RUSSIAN, "prefix"),
             MultilingualQuasiF1ScoreMetric(Language.RUSSIAN),
@@ -4053,7 +4055,7 @@ acva_tasks = [
         few_shots_split="validation",
         metrics=[MultilingualQuasiExactMatchMetric(Language.ARABIC, "full"), LogLikelihoodAccMetric()],
         generation_size=5,
-        stop_sequence=("\n",),
+        stop_sequence=["\n"],
     )
     for subset in ACVA_SUBSET
 ]

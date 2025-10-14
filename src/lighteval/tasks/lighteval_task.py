@@ -24,6 +24,7 @@ import logging
 import random
 from dataclasses import asdict, dataclass, field
 from typing import Callable
+from functools import partial
 
 from datasets import DatasetDict, load_dataset
 from huggingface_hub import TextGenerationInputGrammarType
@@ -178,7 +179,10 @@ class LightevalTaskConfig:
 
             else:
                 if isinstance(v, Callable):
-                    values.append([k, v.__name__])
+                    if isinstance(v, partial):
+                        values.append([k, f"{v.func.__name__} args={v.args} kwargs={v.keywords}"])
+                    else:
+                        values.append([k, v.__name__])
                 else:
                     values.append([k, repr(v)])
 
