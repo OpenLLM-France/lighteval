@@ -221,6 +221,8 @@ class Pipeline:
 
         self.sampling_docs = collections.defaultdict(list)
         for _, docs in self.documents_dict.items():
+            if docs is None:
+                continue
             for doc in docs:
                 for sampling in doc.sampling_methods:
                     self.sampling_docs[sampling].append(doc)

@@ -375,7 +375,9 @@ class LightevalTask:
         eval_docs = self.eval_docs()
 
         if len(eval_docs) == 0:
-            raise ValueError(f"Task {self.name} has no documents to evaluate skipping.")
+            logger.warning(f"Task {self.name} has no documents to evaluate skipping.")
+            return None
+            # raise ValueError(f"Task {self.name} has no documents to evaluate skipping.")
 
         n_samples = min(max_samples, len(eval_docs)) if max_samples else len(eval_docs)
         rnd = random.Random()
