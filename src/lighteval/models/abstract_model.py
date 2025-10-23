@@ -22,6 +22,7 @@
 
 import json
 import re
+import os
 from abc import ABC, abstractmethod
 from typing import Optional, Union
 
@@ -86,7 +87,7 @@ class ModelConfig(BaseModel, extra="forbid"):
 
     generation_parameters: GenerationParameters = GenerationParameters()
     system_prompt: str | None = None
-    cache_dir: str = "~/.cache/huggingface/lighteval"
+    cache_dir: str = os.path.join(os.environ.get("HF_HOME", "~/.cache/huggingface"), "lighteval")
 
     @classmethod
     def from_path(cls, path: str):
