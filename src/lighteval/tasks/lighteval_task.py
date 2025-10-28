@@ -449,11 +449,19 @@ class LightevalTask:
         Returns:
             DatasetDict: The loaded dataset dictionary containing all splits.
         """
-        dataset = load_dataset(
-            path=task.dataset_path,
-            name=task.dataset_config_name,
-            revision=task.dataset_revision,
-        )
+        try:
+            dataset = load_dataset(
+                path=task.dataset_path,
+                name=task.dataset_config_name,
+                revision=task.dataset_revision,
+            )
+        except ValueError:
+            dataset = load_dataset(
+                path=task.dataset_path,
+                data_dir=task.dataset_config_name,
+                revision=task.dataset_revision,
+            )
+
 
         if task.dataset_filter is not None:
             dataset = dataset.filter(task.dataset_filter)

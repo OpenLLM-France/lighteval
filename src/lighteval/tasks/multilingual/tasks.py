@@ -3296,6 +3296,7 @@ mgsm_tasks = [
         ),
         suite=("lighteval",),
         hf_repo="juletxara/mgsm",
+        hf_revision="2e3d3e94b252b3a5829ed998a4f6229e15adb1a7",
         hf_subset=standardize_tag(language.value),
         evaluation_splits=("test",),
         few_shots_split="train",
