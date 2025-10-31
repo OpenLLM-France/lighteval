@@ -1111,6 +1111,8 @@ class TransformersModel(LightevalModel):
                     logits_sum_doc = batch_logits_sums[i]
                     tokenized_contexts_batch = batch_tokenized_contexts_processed[i]
                     tokenized_continuations_batch = batch_tokenized_continuations_processed[i]
+                    # Remove padding (-1) from continuations
+                    tokenized_continuations_batch = [[t for t in tokens if t != -1] for tokens in tokenized_continuations_batch.tolist()]
                     answer = ModelResponse(
                         argmax_logits_eq_gold=[max_equal.cpu().item() for max_equal in max_equals_doc],
                         logprobs=[sum.cpu().item() for sum in logits_sum_doc],
