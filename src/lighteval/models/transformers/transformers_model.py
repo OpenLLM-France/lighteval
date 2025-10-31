@@ -1099,7 +1099,7 @@ class TransformersModel(LightevalModel):
                         # 2d on num choices and max len
                         len_choice = gathered_len_choices[i]
                         batch_tokenized_continuations_processed.append(
-                            gathered_continuations[i][:num_choices][:len_choice]
+                            gathered_continuations[i][:num_choices,:len_choice]
                         )
                         # 1d on max len context
                         len_context = gathered_len_context[i]
