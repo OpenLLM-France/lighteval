@@ -43,6 +43,15 @@ LETTER_INDICES = ["A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K", "L", "M
 INTEGER_INDICES = list(map(str, list(range(1, 27))))
 # fmt: on
 
+def ruler(line, task_name: str = None):
+    query = line["input"]
+    choices = line["outputs"]
+    gold_index = 0
+    instruction = "Only answer the question to complete the prompt, without any additional text.\n"
+    query = f"{instruction}{query}"
+
+    return Doc(query=query, instruction=instruction, choices=choices, gold_index=gold_index, task_name=task_name)
+
 
 def mmmu_pro(line, task_name: Optional[str] = None):
     # fmt: off
