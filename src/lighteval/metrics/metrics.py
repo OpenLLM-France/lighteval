@@ -53,6 +53,7 @@ from lighteval.metrics.metrics_sample import (
     MajAtK,
     PassAtK,
     Recall,
+    RULER,
     StringDistance,
 )
 from lighteval.metrics.normalizations import bigbench_normalizer, remove_braces, remove_braces_and_strip
@@ -141,28 +142,6 @@ class Metrics(Enum):
         corpus_level_fn=np.mean,
         higher_is_better=True,
     )
-
-    ruler_match_any = SampleLevelMetric(
-        metric_name="ruler_match_any",
-        sample_level_fn=lambda predictions, golds, formatted_doc: max(
-            [1.0 if r.lower() in predictions[0].lower() else 0.0 for r in golds]
-        ),
-        category=SamplingMethod.GENERATIVE,
-        corpus_level_fn=np.mean,
-        higher_is_better=True,
-    )
-
-    ruler_match_all = SampleLevelMetric(
-        metric_name="ruler_match_all",
-        sample_level_fn=lambda predictions, golds, formatted_doc: sum(
-            [1.0 if r.lower() in predictions[0].lower() else 0.0 for r in golds]
-        )
-        / len(golds),
-        category=SamplingMethod.GENERATIVE,
-        corpus_level_fn=np.mean,
-        higher_is_better=True,
-    )
-
     bleurt = SampleLevelMetric(
         metric_name="bleurt",
         sample_level_fn=BLEURT(),
@@ -501,6 +480,20 @@ class Metrics(Enum):
     rougeLsum = SampleLevelMetric(
         metric_name="rougeLsum",
         sample_level_fn=ROUGE("rougeLsum"),
+        category=SamplingMethod.GENERATIVE,
+        corpus_level_fn=np.mean,
+        higher_is_better=True,
+    )
+    ruler_match_any = SampleLevelMetric(
+        metric_name="ruler_match_any",
+        sample_level_fn=RULER("any"),
+        category=SamplingMethod.GENERATIVE,
+        corpus_level_fn=np.mean,
+        higher_is_better=True,
+    )
+    ruler_match_all = SampleLevelMetric(
+        metric_name="ruler_match_all",
+        sample_level_fn=RULER("all"),
         category=SamplingMethod.GENERATIVE,
         corpus_level_fn=np.mean,
         higher_is_better=True,
