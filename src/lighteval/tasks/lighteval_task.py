@@ -301,7 +301,7 @@ class LightevalTask:
                 doc = self.formatter(item, self.name)
 
                 # Skip if formatter returns None (e.g., to filter out certain samples)
-                if doc is None:
+                if doc is None or doc == []:
                     continue
 
                 doc.id = str(ix)
