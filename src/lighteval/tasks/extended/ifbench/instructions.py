@@ -1250,7 +1250,7 @@ class ParagraphLastFirstWordMatchChecker(Instruction):
             if not paragraph:
                 continue
             words = paragraph.strip("".join(string.punctuation) + " ").split()
-            if words[0] != words[-1]:
+            if not len(words) or words[0] != words[-1]:
                 return False
         return True
 
