@@ -788,7 +788,7 @@ class PrimeLengthsChecker(Instruction):
         """Checks if the response only includes words with prime length."""
         value = value.translate(str.maketrans("", "", string.punctuation))
         words = value.split()
-        primes = set(2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37, 41, 43, 47, 53, 59, 61, 67, 71, 73, 79, 83, 89, 97)
+        primes = {2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37, 41, 43, 47, 53, 59, 61, 67, 71, 73, 79, 83, 89, 97}
         for word in words:
             if len(word) not in primes:
                 return False
@@ -1131,7 +1131,7 @@ class PronounCountChecker(Instruction):
 
     def check_following(self, value):
         """Checks if the response includes at least {N} pronouns."""
-        pronouns = set(
+        pronouns = {
             "i",
             "me",
             "my",
@@ -1163,7 +1163,7 @@ class PronounCountChecker(Instruction):
             "their",
             "theirs",
             "themselves",
-        )
+        }
         value = value.replace(
             "/", " "
         )  # to correctly count pronoun sets like she/her/hers, a common use case of pronouns
