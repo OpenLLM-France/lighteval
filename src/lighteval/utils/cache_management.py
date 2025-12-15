@@ -25,6 +25,7 @@ import hashlib
 import json
 import logging
 import os
+import re
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Callable, List, Set, Tuple, Union
@@ -171,6 +172,8 @@ class SampleCache:
                 self.registry.task_to_configs[f"{task_suite}|{task_name}"]
             )
             config_str = "|".join([task_config.__str__(lite=True) for task_config in task_configs])
+            # Replace "<function xxx at 0x7fabd0cf8970>" by just "<function xxx>"
+            config_str = re.sub(r"<function (\w+) at 0x[0-9a-fA-F]+>", r"<function \1>", config_str)
             task_hash = hashlib.sha256(config_str.encode()).hexdigest()[:16]
             self._task_hashes[full_task_name] = task_hash
         return self._task_hashes[full_task_name]
