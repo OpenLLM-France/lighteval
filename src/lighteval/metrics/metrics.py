@@ -485,14 +485,14 @@ class Metrics(Enum):
         higher_is_better=True,
     )
     ruler_match_any = SampleLevelMetric(
-        metric_name="ruler_match_any",
+        metric_name="ruler_match",
         sample_level_fn=RULER("any"),
         category=SamplingMethod.GENERATIVE,
         corpus_level_fn=np.mean,
         higher_is_better=True,
     )
     ruler_match_all = SampleLevelMetric(
-        metric_name="ruler_match_all",
+        metric_name="ruler_match",
         sample_level_fn=RULER("all"),
         category=SamplingMethod.GENERATIVE,
         corpus_level_fn=np.mean,

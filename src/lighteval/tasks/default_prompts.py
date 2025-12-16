@@ -46,11 +46,12 @@ INTEGER_INDICES = list(map(str, list(range(1, 27))))
 def ruler(line, task_name: str = None):
     query = line["input"]
     choices = line["outputs"]
-    gold_index = 0
-    instruction = "Only answer the question to complete the prompt, without any additional text.\n"
-    query = f"{instruction}{query}"
+    answer_prefix = line.get("answer_prefix", "")
+    gold_index = list(range(len(choices)))
+    # instruction = "Only answer the question to complete the prompt, without any additional text.\n"
+    query = f"{query} {answer_prefix}"
 
-    return Doc(query=query, instruction=instruction, choices=choices, gold_index=gold_index, task_name=task_name)
+    return Doc(query=query, instruction=None, choices=choices, gold_index=gold_index, task_name=task_name)
 
 
 def mmmu_pro(line, task_name: Optional[str] = None):
