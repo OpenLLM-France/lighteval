@@ -48,6 +48,7 @@ if is_package_available("vllm"):
     import ray
     from more_itertools import distribute
     from vllm import LLM, RequestOutput, SamplingParams
+    from vllm import TokensPrompt
     from vllm.distributed.parallel_state import (
         destroy_distributed_environment,
         destroy_model_parallel,
@@ -291,7 +292,10 @@ class VLLMModel(LightevalModel):
         # Inferring from the tokenizer will cause vllm to bug for models with mismatches between model
         # config and tk config, like mistralai/Mistral-7B-v0.1
         if self._max_length is None:
-            self._max_length = model.llm_engine.model_config.max_seq_len_to_capture
+            try:
+                self._max_length = model.llm_engine.model_config.max_seq_len_to_capture
+            except AttributeError:
+                self._max_length = model.llm_engine.model_config.max_model_len
 
         return model
 
@@ -437,7 +441,10 @@ class VLLMModel(LightevalModel):
             @ray.remote(num_gpus=self.tensor_parallel_size)
             def run_inference_one_model(model_args: dict, sampling_params: SamplingParams, requests):
                 llm = LLM(**model_args)
-                return llm.generate(prompt_token_ids=requests, sampling_params=sampling_params)
+                return llm.generate(
+                    # prompt_token_ids=requests, # vllm 0.10.1
+                    [TokensPrompt(prompt_token_ids=request) for request in requests],
+                    sampling_params=sampling_params)
 
             # dispatch requests to all self.data_parallel_size workers, in interleaved fashion
             # interleaved important to balance context lengths across workers
@@ -455,7 +462,8 @@ class VLLMModel(LightevalModel):
             ]
         else:
             outputs = self.model.generate(
-                prompt_token_ids=inputs,
+                # prompt_token_ids=inputs, # vllm 0.10.1
+                [TokensPrompt(prompt_token_ids=input) for input in inputs],
                 sampling_params=sampling_params,
                 use_tqdm=True,
             )
@@ -578,7 +586,10 @@ class AsyncVLLMModel(VLLMModel):
 
         # If the max_length can't get extracted from the config, it will be inferred from the model
         if self._max_length is None:
-            self._max_length = model.model_config.max_seq_len_to_capture
+            try:
+                self._max_length = model.model_config.max_seq_len_to_capture
+            except AttributeError:
+                self._max_length = model.model_config.max_model_len
 
         return model
 
