@@ -435,6 +435,7 @@ class VLLMModel(LightevalModel):
             sampling_params.prompt_logprobs = 1
             sampling_params.max_tokens = 1
             sampling_params.detokenize = False
+            sampling_params.skip_reading_prefix_cache = True # To avoid issues with logprobs when using prefix caching (see __post_init__ method of SamplingParams)
 
         if self.data_parallel_size > 1:
 
@@ -502,6 +503,33 @@ class VLLMModel(LightevalModel):
                 inputs = [input[-self.max_length :] for input in inputs]
             outputs = self._generate(inputs, generate=False)
 
+            # # Fix the effect of prefix caching on logprobs
+            # for i, output in enumerate(outputs):
+            #     logprobs = output.prompt_logprobs
+            #     prefix_maxindex = -1
+            #     for j, logprob in enumerate(logprobs):
+            #         if isinstance(logprob, dict) and len(logprob) == 1 and next(iter(logprob.values())).logprob == 0.0:
+            #             prefix_maxindex = j
+            #     if prefix_maxindex > 0:
+            #         has_found = False
+            #         # Search the sequence that has the same prefix
+            #         prefix = inputs[i][:prefix_maxindex+1]
+            #         for k in range(i - 1, -1, -1):
+            #             if inputs[k][:prefix_maxindex+1] == prefix:
+            #                 has_found = True
+            #                 for j in range(prefix_maxindex+1):
+            #                     logprobs[j] = outputs[k].prompt_logprobs[j]
+            #                 break
+            #         if not has_found:
+            #             raise RuntimeError(
+            #                 "Cannot find the sequence with the same prefix when fixing the logprobs with prefix caching, for sequence index {}.".format(i)
+            #             )
+            #         else:
+            #             logger.warning(
+            #                 "Fixed the logprobs affected by prefix caching for sequence index {}.".format(i)
+            #             )
+            #         outputs[i].prompt_logprobs = logprobs
+
             flat_index = 0
             for i, doc in enumerate(split):
                 outputs_doc = outputs[flat_index : flat_index + len(doc.choices)]
@@ -517,7 +545,9 @@ class VLLMModel(LightevalModel):
                 ):
                     continuation_logprobs = []
                     for token, logprobs in zip(continuation[::-1], output.prompt_logprobs[::-1]):
-                        continuation_logprobs.append(logprobs[token])
+                        logprob = logprobs[token]
+                        assert logprob.logprob <= 0.0, f"Logprob cannot be positive: {logprob.logprob}"
+                        continuation_logprobs.append(logprob)
 
                     bool_score = all(logprob.rank == 1 for logprob in continuation_logprobs)
                     continuation_logprobs = [logprob.logprob for logprob in continuation_logprobs]
