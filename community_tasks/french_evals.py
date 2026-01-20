@@ -56,12 +56,12 @@ def prompt_ifeval_fr(line, task_name: str = None):
 # qpqa-fr prompt function
 def prompt_gpqa_fr(line, task_name: str = None):
     gold_index = random.randint(0, 3)
-    choices = [line["Réponse incorrecte 1"], line["Réponse incorrecte 2"], line["Réponse incorrecte 3"]]
-    choices.insert(gold_index, line["Réponse correcte"])
+    choices = [line["Incorrect Answer 1"], line["Incorrect Answer 2"], line["Incorrect Answer 3"]]
+    choices.insert(gold_index, line["Correct Answer"])
 
     instruction = "Choisissez la réponse correcte aux questions suivantes.\n\n"
 
-    query = f"Question: {line['Question']}\n"
+    query = f"Question: {line['problem']}\n"
     query += "".join([f"{key}. {choice}\n" for key, choice in zip(LETTER_INDICES, choices)])
     query += "Réponse: "
     return Doc(
@@ -113,7 +113,7 @@ gpqa_fr_task = LightevalTaskConfig(
     name="gpqa-fr",
     suite=["community"],
     prompt_function=prompt_gpqa_fr,
-    hf_repo="fr-gouv-coordination-ia/gpqa-fr",
+    hf_repo="kurakurai/gpqa-fr", # "le-leadboard/gpqa-fr", # "fr-gouv-coordination-ia/gpqa-fr",
     hf_subset="default",
     hf_avail_splits=["train"],
     evaluation_splits=["train"],
