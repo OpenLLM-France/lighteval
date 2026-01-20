@@ -217,6 +217,8 @@ class StopWordPercentageChecker(Instruction):
         """Checks if the response contains the expected percentage of stop words."""
         num_words = instructions_util.count_words(value)
         num_stopwords = instructions_util.count_stopwords(value)
+        if num_words == 0:
+            return False
         stopword_percentage = (num_stopwords / num_words) * 100
         return stopword_percentage <= self._percentage
 
@@ -510,6 +512,8 @@ class AlphabetLoopChecker(Instruction):
         """Checks if each word of the response starts with the next letter of the alphabet."""
         value = value.translate(str.maketrans("", "", string.punctuation))
         words = value.strip("".join(string.punctuation) + " ").split()
+        if not words:
+            return False
         alphabet = string.ascii_lowercase
         correct_letter = words[0][0].lower()
         if correct_letter not in alphabet:  # numbers are fails
@@ -901,6 +905,8 @@ class EmojiSentenceChecker(Instruction):
             if not emoji.is_emoji(last_char) and not emoji.is_emoji(second_last_char):
                 if i < len(sentences) - 1:
                     stripped = sentences[i + 1].translate(str.maketrans("", "", string.punctuation)).strip()
+                    if not len(stripped):
+                        return False
                     first_char = stripped[0]
                     if not emoji.is_emoji(first_char):
                         return False
