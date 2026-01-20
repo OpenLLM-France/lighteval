@@ -306,7 +306,8 @@ class VLLMModel(LightevalModel):
             trust_remote_code=config.trust_remote_code,
             revision=config.revision,
         )
-        tokenizer.pad_token = tokenizer.eos_token
+        if hasattr(tokenizer, "eos_token"):
+            tokenizer.pad_token = tokenizer.eos_token
         return tokenizer
 
     @cached(SamplingMethod.GENERATIVE)
