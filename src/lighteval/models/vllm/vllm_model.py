@@ -266,6 +266,8 @@ class VLLMModel(LightevalModel):
             "max_num_batched_tokens": int(config.max_num_batched_tokens),
             "enforce_eager": True,
         }
+        if self._max_length:
+            self.model_args["hf_overrides"] = {"max_position_embeddings": self._max_length}
 
         if config.quantization is not None:
             self.model_args["quantization"] = config.quantization
