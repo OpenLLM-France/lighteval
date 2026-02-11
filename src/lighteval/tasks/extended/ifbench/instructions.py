@@ -1222,6 +1222,7 @@ class LastWordFirstNextChecker(Instruction):
     def check_following(self, value):
         """Checks if the last word of each sentence in the response is the first word of the next sentence."""
         sentences = instructions_util.split_into_sentences(value)
+        sentences = [s for s in sentences if s.strip("".join(string.punctuation) + " ").split()] # Remove empty sentences
         for i in range(len(sentences) - 1):
             last_word = sentences[i].rstrip("".join(string.punctuation) + " ").split()[-1]
             first_word = sentences[i + 1].lstrip("".join(string.punctuation) + " ").split()[0]
