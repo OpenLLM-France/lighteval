@@ -1498,15 +1498,31 @@ class GPassAtK(SamplingMetric, SampleLevelComputation):
 
 
 class COMETMetric(SampleLevelComputation):
-    def __init__(self, model_name: str = "Unbabel/wmt22-comet-da", source_column: str = "source"):
+    def __init__(
+        self,
+        model_name: str = "Unbabel/wmt22-comet-da",
+        source_column: str = "source",
+        batch_size: int = 8,
+        gpus: int = 0,
+        accelerator: str = "cpu",
+    ):
         """COMET metric for machine translation evaluation.
 
         Args:
             model_name (str): Name of the COMET model to use.
             source_column (str): Key in doc.specific containing the source text.
+            batch_size (int): Batch size for COMET model inference.
+            gpus (int): Number of GPUs to use (0 for CPU-only).
+            accelerator (str): Accelerator to use ("cpu" or "cuda"). MPS is not supported.
         """
+        if accelerator == "mps":
+            raise ValueError("MPS is not supported for COMET")
+
         self.model_name = model_name
         self.source_column = source_column
+        self.batch_size = batch_size
+        self.gpus = gpus
+        self.accelerator = accelerator
         self._model = None
 
     def compute(self, doc: Doc, model_response: ModelResponse, **kwargs) -> float:
@@ -1517,11 +1533,12 @@ class COMETMetric(SampleLevelComputation):
             model_response (ModelResponse): The model's response containing predictions.
 
         Returns:
-            float: COMET score (higher is better, typically 0-1).
+            float: COMET score scaled to 0-100 (higher is better).
         """
         if self._model is None:
             from comet import download_model, load_from_checkpoint
 
+            logger.info(f"Loading COMET model {self.model_name}...")
             model_path = download_model(self.model_name)
             self._model = load_from_checkpoint(model_path)
 
@@ -1530,8 +1547,13 @@ class COMETMetric(SampleLevelComputation):
         reference = doc.get_golds()[0]
 
         data = [{"src": source, "mt": prediction, "ref": reference}]
-        output = self._model.predict(data, batch_size=1, gpus=0)
-        return output.scores[0]
+        output = self._model.predict(
+            data,
+            batch_size=self.batch_size,
+            gpus=self.gpus,
+            accelerator=self.accelerator,
+        )
+        return output.scores[0] * 100
 
 
 class MetricXMetric(SampleLevelComputation):
@@ -1540,6 +1562,8 @@ class MetricXMetric(SampleLevelComputation):
         model_name: str = "google/metricx-24-hybrid-large-v2p6",
         tokenizer_name: str = "google/mt5-large",
         source_column: str = "source",
+        batch_size: int = 8,
+        device: str = "cpu",
     ):
         """MetricX metric for machine translation evaluation.
 
@@ -1547,10 +1571,14 @@ class MetricXMetric(SampleLevelComputation):
             model_name (str): Name of the MetricX model to use.
             tokenizer_name (str): Name of the tokenizer to use.
             source_column (str): Key in doc.specific containing the source text.
+            batch_size (int): Batch size for tokenization.
+            device (str): Device to run inference on ("cpu", "cuda").
         """
         self.model_name = model_name
         self.tokenizer_name = tokenizer_name
         self.source_column = source_column
+        self.batch_size = batch_size
+        self.device = device
         self._model = None
         self._tokenizer = None
 
@@ -1569,7 +1597,9 @@ class MetricXMetric(SampleLevelComputation):
         if self._model is None:
             from metricx import models
 
+            logger.info(f"Loading MetricX model {self.model_name}...")
             self._model = models.MT5ForRegression.from_pretrained(self.model_name)
+            self._model.to(self.device)
             self._model.eval()
             self._tokenizer = AutoTokenizer.from_pretrained(self.tokenizer_name)
 
@@ -1579,6 +1609,7 @@ class MetricXMetric(SampleLevelComputation):
 
         input_text = f"candidate: {prediction} reference: {reference} source: {source}"
         inputs = self._tokenizer(input_text, return_tensors="pt", truncation=True, max_length=1024)
+        inputs = {k: v.to(self.device) for k, v in inputs.items()}
 
         with torch.no_grad():
             output = self._model(**inputs)
