@@ -71,7 +71,7 @@ class SampleLevelComputation(ABC):
         attr_strs = []
         for k, v in attrs.items():
             if callable(v):
-                val_str = v.__name__
+                val_str = getattr(v, "__name__", type(v).__name__)
             else:
                 val_str = str(v)
             attr_strs.append(f"{k}={val_str}")
