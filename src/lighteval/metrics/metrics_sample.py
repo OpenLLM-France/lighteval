@@ -1592,15 +1592,11 @@ class MetricXMetric(SampleLevelComputation):
         Returns:
             float: MetricX score (lower is better, typically 0-25).
         """
-        import torch
-
         if self._model is None:
-            from metricx import models
+            from lighteval.metrics.imports.metricx_model import MetricXModel
 
             logger.info(f"Loading MetricX model {self.model_name}...")
-            self._model = models.MT5ForRegression.from_pretrained(self.model_name)
-            self._model.to(self.device)
-            self._model.eval()
+            self._model = MetricXModel(self.model_name, device=self.device)
             self._tokenizer = AutoTokenizer.from_pretrained(self.tokenizer_name)
 
         source = doc.specific[self.source_column]
@@ -1609,9 +1605,8 @@ class MetricXMetric(SampleLevelComputation):
 
         input_text = f"candidate: {prediction} reference: {reference} source: {source}"
         inputs = self._tokenizer(input_text, return_tensors="pt", truncation=True, max_length=1024)
-        inputs = {k: v.to(self.device) for k, v in inputs.items()}
+        # MetricX requires removing the EOS token appended by the tokenizer
+        input_ids = inputs["input_ids"][:, :-1].to(self.device)
+        attention_mask = inputs["attention_mask"][:, :-1].to(self.device)
 
-        with torch.no_grad():
-            output = self._model(**inputs)
-
-        return output.score.item()
+        return self._model.predict(input_ids, attention_mask).item()
