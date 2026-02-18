@@ -32,7 +32,7 @@ def prompt_mathalea(line, task_name: str = None):
     )
     query += "Réponse :"
 
-    gold_index = LETTER_INDICES.index(line["answerKey"])
+    gold_index = int(line["answerKey"])
 
     return Doc(
         task_name=task_name,
