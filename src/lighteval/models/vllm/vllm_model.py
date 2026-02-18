@@ -548,6 +548,8 @@ class VLLMModel(LightevalModel):
                 ):
                     continuation_logprobs = []
                     for token, logprobs in zip(continuation[::-1], output.prompt_logprobs[::-1]):
+                        if logprobs is None:
+                            continue  # skip None entries (prefix caching / chunked prefill artifact)
                         logprob = logprobs[token]
                         assert logprob.logprob <= 0.0, f"Logprob cannot be positive: {logprob.logprob}"
                         continuation_logprobs.append(logprob)
