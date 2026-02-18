@@ -43,6 +43,7 @@ from lighteval.metrics.metrics_sample import (
     AccGoldLikelihood,
     AvgAtK,
     BertScore,
+    COMETMetric,
     ExactMatches,
     Extractiveness,
     F1_score,
@@ -51,6 +52,7 @@ from lighteval.metrics.metrics_sample import (
     JudgeLLMSimpleQA,
     LoglikelihoodAcc,
     MajAtK,
+    MetricXMetric,
     PassAtK,
     Recall,
     RULER,
@@ -168,6 +170,13 @@ class Metrics(Enum):
         sample_level_fn=GenerativePreparator(),
         category=SamplingMethod.GENERATIVE,
         corpus_level_fn=CorpusLevelTranslationMetric("chrf++"),
+        higher_is_better=True,
+    )
+    comet = SampleLevelMetric(
+        metric_name="comet",
+        sample_level_fn=COMETMetric(),
+        category=SamplingMethod.GENERATIVE,
+        corpus_level_fn=np.mean,
         higher_is_better=True,
     )
     copyright = SampleLevelMetricGrouping(
@@ -378,6 +387,13 @@ class Metrics(Enum):
         category=SamplingMethod.LOGPROBS,
         corpus_level_fn=MatthewsCorrCoef(),
         higher_is_better=True,
+    )
+    metricx = SampleLevelMetric(
+        metric_name="metricx",
+        sample_level_fn=MetricXMetric(),
+        category=SamplingMethod.GENERATIVE,
+        corpus_level_fn=np.mean,
+        higher_is_better=False,
     )
     mrr = SampleLevelMetric(
         metric_name="mrr",
