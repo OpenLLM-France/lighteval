@@ -196,6 +196,7 @@ class VLLMModel(LightevalModel):
         )
         self.data_parallel_size = config.data_parallel_size
         self.tensor_parallel_size = config.tensor_parallel_size
+        self.pipeline_parallel_size = config.pipeline_parallel_size
         self._add_special_tokens = config.add_special_tokens if config.add_special_tokens is not None else False
         self._tokenizer = self._create_auto_tokenizer(config)
 
@@ -275,7 +276,7 @@ class VLLMModel(LightevalModel):
             self.model_args["load_format"] = config.load_format
 
         if config.data_parallel_size > 1:
-            self.model_args["distributed_executor_backend"] = "ray"
+            self.model_args["distributed_executor_backend"] = "mp"
             self._batch_size = "auto"
 
             if self._max_length is None:
@@ -442,7 +443,7 @@ class VLLMModel(LightevalModel):
 
         if self.data_parallel_size > 1:
 
-            @ray.remote(num_gpus=self.tensor_parallel_size)
+            @ray.remote(num_gpus=self.tensor_parallel_size * self.pipeline_parallel_size)
             def run_inference_one_model(model_args: dict, sampling_params: SamplingParams, requests):
                 llm = LLM(**model_args)
                 return llm.generate(
