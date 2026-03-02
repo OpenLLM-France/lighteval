@@ -899,6 +899,8 @@ class EmojiSentenceChecker(Instruction):
         sentences = instructions_util.split_into_sentences(value)
         for i, sentence in enumerate(sentences):
             stripped = sentence.translate(str.maketrans("", "", string.punctuation)).strip()
+            if not len(stripped):
+                return False
             last_char = stripped[-1]
             # because blank spaces are treated oddly
             second_last_char = stripped[-2] if len(stripped) > 1 else stripped[-1]
