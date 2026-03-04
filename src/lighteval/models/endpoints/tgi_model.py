@@ -127,7 +127,10 @@ class ModelClient(InferenceEndpointModel):
 
         # Initialize prompt manager (required by parent class)
         self.prompt_manager = PromptManager(
-            use_chat_template=True, tokenizer=self.tokenizer, system_prompt=config.system_prompt
+            use_chat_template=True,
+            tokenizer=self.tokenizer,
+            system_prompt=config.system_prompt,
+            enable_thinking=config.enable_thinking,
         )
 
         # Initialize cache for tokenization and predictions
