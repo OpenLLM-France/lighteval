@@ -1,10 +1,23 @@
 """
-MathAlea French math multiple-choice benchmark for lighteval.
+name:
+MathAlea
 
-Evaluates LLMs on French secondary school math problems across 5 grade levels:
-cinquième, quatrième, troisième, première, terminale.
+dataset:
+OpenLLM-France/MathAleaMCQ
 
-Dataset: OpenLLM-BPI/MathAleaMCQ
+abstract:
+MathAlea is a dataset of multiple-choice math questions for French middle and high school students.
+It covers a range of topics and difficulty levels, making it a valuable resource for evaluating the 
+mathematical reasoning capabilities of language models in the context of education.
+
+languages:
+french
+
+tags:
+math, question-answering, multiple-choice
+
+paper:
+
 """
 
 from lighteval.metrics.metrics import Metrics
