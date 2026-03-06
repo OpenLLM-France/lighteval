@@ -3,7 +3,7 @@ name:
 MathAlea
 
 dataset:
-OpenLLM-France/MathAleaMCQ
+OpenLLM-BPI/MathAleaMCQ
 
 abstract:
 MathAlea is a dataset of multiple-choice math questions for French middle and high school students.
