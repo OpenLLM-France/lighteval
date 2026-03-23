@@ -44,28 +44,40 @@ def remove_accents(text: str) -> str:
 FORMULATIONS = [MCFFormulation(), CFFormulation(), HybridFormulation()]
 
 
-def format_choice(choice):
-    if isinstance(choice, str):
-        if choice.endswith("\qquad"):
-            choice = choice[:-6].strip()
-        return choice.strip()
-    if isinstance(choice, list):
-        return [format_choice(c) for c in choice]
-    raise ValueError(f"Unsupported choice type: {type(choice)}")
+PROMPT_CONFIGS = {
+    "frprompt": {
+        "all": "Vous êtes un assistant mathématique pour les élèves du secondaire français.\n\n",
+        "grade": "Vous êtes un assistant mathématique pour les élèves de {subset}.\n\n",
+    },
+    "enprompt": {
+        "all": "You are a helpful math assistant for French secondary school students.\n\n",
+        "grade": "You are a helpful math assistant for French students in grade {subset}.\n\n",
+    },
+    "noprompt": None,
+}
 
-def format_question(question):
-    return question.replace("\\", "\n").strip()
+
+def _get_instruction(prompt_key, subset):
+    prompt_cfg = PROMPT_CONFIGS[prompt_key]
+    if prompt_cfg is None:
+        return None
+    if subset == "all":
+        return prompt_cfg["all"]
+    return prompt_cfg["grade"].format(subset=subset)
 
 
-def _make_tasks(subset, alias, formulation):
+def _make_tasks(subset, alias, formulation, prompt_key):
+    instruction = _get_instruction(prompt_key, subset)
+
     return LightevalTaskConfig(
-        name=f"mathalea_{formulation.name.lower()}:{alias}",
+        name=f"mathalea_{formulation.name.lower()}_{prompt_key}:{alias}",
         prompt_function=get_mcq_prompt_function(
             Language.FRENCH,
-            lambda line: {
-                "question": format_question(line["question"]),
-                "choices": format_choice(line["choices"]),
+            lambda line, instr=instruction: {
+                "question": line["question"],
+                "choices": line["choices"],
                 "gold_idx": int(line["answerKey"]),
+                **({"instruction": instr} if instr else {}),
             },
             formulation=formulation,
         ),
@@ -90,7 +102,8 @@ def _make_tasks(subset, alias, formulation):
 
 
 TASKS_TABLE = [
-    _make_tasks(subset, remove_accents(subset), formulation)
+    _make_tasks(subset, remove_accents(subset), formulation, prompt_key)
     for subset in ["all"] + GRADE_LEVELS
     for formulation in FORMULATIONS
+    for prompt_key in PROMPT_CONFIGS
 ]
