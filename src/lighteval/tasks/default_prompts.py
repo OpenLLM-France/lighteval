@@ -1812,6 +1812,28 @@ def mmlu_professional_psychology(line, task_name: str = None):
     return mmlu(line, "professional_psychology", task_name)
 
 
+def mmlu_pro(line, task_name: str = None):
+    options = line["options"]
+    choices_str = "\n".join([f"{letter}: {choice}" for letter, choice in zip(LETTER_INDICES, options)])
+    valid_letters = "".join(LETTER_INDICES[: len(options)])
+
+    instruction = (
+        "Answer the following multiple choice question. The last line of your response should be of the following"
+        f" format: 'Answer: $LETTER' (without quotes) where LETTER is one of {valid_letters}."
+        " Think step by step before answering.\n\n"
+    )
+
+    query = instruction + f"{line['question']}\n\n{choices_str}\n\nAnswer:"
+
+    return Doc(
+        task_name=task_name,
+        query=query,
+        choices=LETTER_INDICES[: len(options)],
+        gold_index=line["answer_index"],
+        instruction=instruction,
+    )
+
+
 def mmlu_public_relations(line, task_name: str = None):
     return mmlu(line, "public_relations", task_name)
 

@@ -14467,6 +14467,24 @@ mmlu_world_religions_helm = LightevalTaskConfig(
     stop_sequence=["\n"],
     version=0,
 )
+# MMLU-Pro: A more robust and challenging version of MMLU with 10 choices instead of 4.
+# Contains 12K complex questions across various disciplines.
+# Paper: https://arxiv.org/abs/2406.01574
+mmlu_pro = LightevalTaskConfig(
+    name="mmlu_pro",
+    suite=["lighteval"],
+    prompt_function=prompt.mmlu_pro,
+    hf_repo="TIGER-Lab/MMLU-Pro",
+    hf_subset="default",
+    hf_revision="3373e0b32277875b8db2aa555a333b78a08477ea",
+    evaluation_splits=["test"],
+    few_shots_split="validation",
+    few_shots_select=None,
+    generation_size=4096,
+    metrics=[Metrics.gpqa_instruct_metric],
+    stop_sequence=None,
+    version=0,
+)
 mnist_ascii_bigbench = LightevalTaskConfig(
     name="mnist_ascii",
     suite=["bigbench", "bigbench_json"],
