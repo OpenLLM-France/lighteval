@@ -87,6 +87,16 @@ class JudgeLLMLlamaGuard(JudgeLLM):
         options = [None] * len(docs)
         golds = [None] * len(docs)
 
+        # Override vLLM sampling params to use greedy decoding (temperature=0).
+        # The default JudgeLM vLLM backend uses temperature=0.8, which leads to
+        # non-deterministic results. Llama-Guard-3-8B documentation does not specify
+        # any temperature, so we use temperature=0 for reproducibility.
+        self.judge._JudgeLM__lazy_load_client()
+        if hasattr(self.judge, "sampling_params"):
+            from vllm import SamplingParams
+
+            self.judge.sampling_params = SamplingParams(temperature=0, max_tokens=self.judge.max_tokens)
+
         scores, messages, judgements = self.judge.evaluate_answer_batch(questions, predictions, options, golds)
 
         metrics = []
@@ -94,6 +104,7 @@ class JudgeLLMLlamaGuard(JudgeLLM):
             metrics.append(
                 {
                     f"safety_rate_{self.short_judge_name}": scores[i],
+                    f"judge_response_{self.short_judge_name}": judgements[i],
                 }
             )
 
