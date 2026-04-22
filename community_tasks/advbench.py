@@ -36,8 +36,8 @@ import logging
 
 import numpy as np
 
-from lighteval.metrics.metrics_sample import JudgeLLM
-from lighteval.metrics.utils.metric_utils import SampleLevelMetricGrouping
+from lighteval.metrics.metrics_sample import JudgeLLM, SampleLevelComputation
+from lighteval.metrics.utils.metric_utils import SampleLevelMetric, SampleLevelMetricGrouping
 from lighteval.tasks.lighteval_task import LightevalTaskConfig
 from lighteval.tasks.requests import Doc, SamplingMethod
 
@@ -168,6 +168,20 @@ llm_judge_advbench = SampleLevelMetricGrouping(
 )
 
 
+class DummyMetric(SampleLevelComputation):
+    def compute(self, model_response, doc, **kwargs):
+        return 1
+
+
+dummy_metric = SampleLevelMetric(
+    metric_name="dummy",
+    higher_is_better=True,
+    category=SamplingMethod.GENERATIVE,
+    sample_level_fn=DummyMetric(),
+    corpus_level_fn=np.mean,
+)
+
+
 advbench_task = LightevalTaskConfig(
     name="advbench",
     suite=["community"],
@@ -182,4 +196,18 @@ advbench_task = LightevalTaskConfig(
     version="0.1",
 )
 
-TASKS_TABLE = [advbench_task]
+advbench_noeval_task = LightevalTaskConfig(
+    name="advbench_noeval",
+    suite=["community"],
+    prompt_function=advbench_prompt,
+    hf_repo="walledai/AdvBench",
+    hf_subset="default",
+    metrics=[dummy_metric],
+    hf_avail_splits=["train"],
+    evaluation_splits=["train"],
+    generation_size=1024,
+    stop_sequence=[],
+    version="0.1",
+)
+
+TASKS_TABLE = [advbench_task, advbench_noeval_task]
