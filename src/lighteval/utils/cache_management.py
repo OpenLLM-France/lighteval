@@ -176,6 +176,7 @@ class SampleCache:
                 task_name = parts[0]
 
             task_configs: list[LightevalTaskConfig] = self.registry.task_to_configs[task_name]
+            # Use deterministic ordering based on string repr
             config_strs = sorted([cfg.__str__(lite=True) for cfg in task_configs])
             config_str = "|".join(config_strs)
             # Strip function memory addresses so the hash stays deterministic across runs.

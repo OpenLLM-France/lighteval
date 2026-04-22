@@ -168,7 +168,13 @@ class JudgeLM:
                 raise_if_package_not_available("vllm")
                 if self.pipe is None:
                     from vllm import LLM, SamplingParams
-                    from vllm.transformers_utils.tokenizer import get_tokenizer
+
+                    try:
+                        # vLLM moved `get_tokenizer` to `vllm.tokenizers` in v0.12.0.
+                        # Keep the fallback while our lower bound remains on v0.11.x.
+                        from vllm.tokenizers import get_tokenizer
+                    except ModuleNotFoundError:
+                        from vllm.transformers_utils.tokenizer import get_tokenizer
 
                     self.sampling_params = SamplingParams(temperature=0.8, top_p=0.95, max_tokens=self.max_tokens)
                     self.tokenizer = get_tokenizer(self.model, tokenizer_mode="auto")

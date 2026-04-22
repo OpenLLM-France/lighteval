@@ -127,24 +127,7 @@ ifeval_fr_task = LightevalTaskConfig(
     version=0,
 )
 
-# GPQA-fr task
-# MCQ evaluation is not adapted for that task that requires reasoning before answering
-# gpqa_fr_task = LightevalTaskConfig(
-#     name="gpqa-fr",
-#     suite=["community"],
-#     prompt_function=prompt_gpqa_fr,
-#     hf_repo="kurakurai/gpqa-fr", # "le-leadboard/gpqa-fr", # "fr-gouv-coordination-ia/gpqa-fr",
-#     hf_subset="default",
-#     hf_avail_splits=["train"],
-#     evaluation_splits=["train"],
-#     few_shots_split=None,
-#     few_shots_select="random_sampling",
-#     generation_size=1,
-#     metrics=[Metrics.loglikelihood_acc],
-#     stop_sequence=["\n"],
-#     version=0,
-# )
-
+# GPQA-fr metric (same as GPQA with French instead of English)
 gpqa_fr_pass_at_1 = SampleLevelMetric(
     metric_name="gpqa_fr_pass@1",
     sample_level_fn=PassAtK(
@@ -165,6 +148,7 @@ gpqa_fr_pass_at_1 = SampleLevelMetric(
     higher_is_better=True,
 )
 
+# GPQA-fr task
 gpqa_fr_task = LightevalTaskConfig(
     name="gpqa-fr:diamond",
     prompt_function=prompt_gpqa_fr_instruct,

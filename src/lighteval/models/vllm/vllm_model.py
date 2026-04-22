@@ -45,16 +45,29 @@ from lighteval.utils.imports import is_package_available, requires
 logger = logging.getLogger(__name__)
 
 
+def build_vllm_token_prompts(inputs: list[list[int]]) -> list:
+    """Build token prompts across vLLM prompt-schema reorganizations."""
+    from vllm.inputs import TokensPrompt
+
+    return [TokensPrompt(prompt_token_ids=token_ids) for token_ids in inputs]
+
+
 if is_package_available("vllm"):
     import ray
     from more_itertools import distribute
-    from vllm import LLM, RequestOutput, SamplingParams, TokensPrompt
+    from vllm import LLM, RequestOutput, SamplingParams
     from vllm.distributed.parallel_state import (
         destroy_distributed_environment,
         destroy_model_parallel,
     )
-    from vllm.transformers_utils.tokenizer import get_tokenizer
     from vllm.v1.engine.async_llm import AsyncEngineArgs, AsyncLLM
+
+    try:
+        # vLLM moved `get_tokenizer` to `vllm.tokenizers` in v0.12.0.
+        # Keep the fallback while our lower bound remains on v0.11.x.
+        from vllm.tokenizers import get_tokenizer
+    except ModuleNotFoundError:
+        from vllm.transformers_utils.tokenizer import get_tokenizer
 
     logging.getLogger("vllm").propagate = True
     logging.getLogger("vllm").handlers.clear()
@@ -477,9 +490,9 @@ class VLLMModel(LightevalModel):
         generate: bool = True,
     ) -> list:
         """Contains the actual logic of the generation."""
-        sampling_params = SamplingParams(**self.config.generation_parameters.to_vllm_dict())
 
         if generate:
+            sampling_params = SamplingParams(**self.config.generation_parameters.to_vllm_dict())
             sampling_params.n = num_samples
             sampling_params.max_tokens = max_new_tokens
             sampling_params.stop = stop_tokens
@@ -489,11 +502,12 @@ class VLLMModel(LightevalModel):
                     "num_samples > 1 is not supported with temperature=0, please set temperature > 0 or use non sampling metrics."
                 )
         else:
-            sampling_params.temperature = 0
-            sampling_params.prompt_logprobs = 1
-            sampling_params.max_tokens = 1
-            sampling_params.detokenize = False
-            sampling_params.skip_reading_prefix_cache = True  # To avoid issues with logprobs when using prefix caching (see __post_init__ method of SamplingParams)
+            sampling_params = SamplingParams(
+                temperature=0.0,
+                prompt_logprobs=1,
+                max_tokens=1,
+                detokenize=False,
+            )
 
         if self.data_parallel_size > 1:
 
@@ -502,11 +516,8 @@ class VLLMModel(LightevalModel):
             )
             def run_inference_one_model(model_args: dict, sampling_params: SamplingParams, requests):
                 llm = LLM(**model_args)
-                return llm.generate(
-                    # prompt_token_ids=requests, # vllm 0.10.1
-                    [TokensPrompt(prompt_token_ids=request) for request in requests],
-                    sampling_params=sampling_params,
-                )
+                prompts = build_vllm_token_prompts(requests)
+                return llm.generate(prompts=prompts, sampling_params=sampling_params)
 
             # dispatch requests to all self.data_parallel_size workers, in interleaved fashion
             # interleaved important to balance context lengths across workers
@@ -523,9 +534,9 @@ class VLLMModel(LightevalModel):
                 if x is not None
             ]
         else:
+            prompts = build_vllm_token_prompts(inputs)
             outputs = self.model.generate(
-                # prompt_token_ids=inputs, # vllm 0.10.1
-                [TokensPrompt(prompt_token_ids=input) for input in inputs],
+                prompts=prompts,
                 sampling_params=sampling_params,
                 use_tqdm=True,
             )
@@ -564,33 +575,6 @@ class VLLMModel(LightevalModel):
                 inputs = [input[-self.max_length :] for input in inputs]
             outputs = self._generate(inputs, generate=False)
 
-            # # Fix the effect of prefix caching on logprobs
-            # for i, output in enumerate(outputs):
-            #     logprobs = output.prompt_logprobs
-            #     prefix_maxindex = -1
-            #     for j, logprob in enumerate(logprobs):
-            #         if isinstance(logprob, dict) and len(logprob) == 1 and next(iter(logprob.values())).logprob == 0.0:
-            #             prefix_maxindex = j
-            #     if prefix_maxindex > 0:
-            #         has_found = False
-            #         # Search the sequence that has the same prefix
-            #         prefix = inputs[i][:prefix_maxindex+1]
-            #         for k in range(i - 1, -1, -1):
-            #             if inputs[k][:prefix_maxindex+1] == prefix:
-            #                 has_found = True
-            #                 for j in range(prefix_maxindex+1):
-            #                     logprobs[j] = outputs[k].prompt_logprobs[j]
-            #                 break
-            #         if not has_found:
-            #             raise RuntimeError(
-            #                 "Cannot find the sequence with the same prefix when fixing the logprobs with prefix caching, for sequence index {}.".format(i)
-            #             )
-            #         else:
-            #             logger.warning(
-            #                 "Fixed the logprobs affected by prefix caching for sequence index {}.".format(i)
-            #             )
-            #         outputs[i].prompt_logprobs = logprobs
-
             flat_index = 0
             for i, doc in enumerate(split):
                 outputs_doc = outputs[flat_index : flat_index + len(doc.choices)]
@@ -604,16 +588,23 @@ class VLLMModel(LightevalModel):
                 for output, context, continuation in zip(
                     outputs_doc, tokenized_contexts_doc, tokenized_continuations_doc
                 ):
+                    actual_input_len = len(output.prompt_token_ids)
+                    continuation_len = len(continuation)
+                    continuation_start_idx = actual_input_len - continuation_len
+                    continuation_prompt_logprobs = output.prompt_logprobs[continuation_start_idx:]
+
                     continuation_logprobs = []
-                    for token, logprobs in zip(continuation[::-1], output.prompt_logprobs[::-1]):
-                        if logprobs is None:
-                            continue  # skip None entries (prefix caching / chunked prefill artifact)
-                        logprob = logprobs[token]
-                        assert logprob.logprob <= 0.0, f"Logprob cannot be positive: {logprob.logprob}"
+                    for token, logprobs_at_position in zip(continuation, continuation_prompt_logprobs):
+                        # vllm>=0.12 can return None entries for tokens served from the prefix cache.
+                        if logprobs_at_position is None:
+                            continue
+                        logprob = logprobs_at_position[token]
+                        assert logprob.logprob <= 0.0, f"Logprob must be <= 0, got {logprob.logprob}"
                         continuation_logprobs.append(logprob)
 
                     bool_score = all(logprob.rank == 1 for logprob in continuation_logprobs)
                     continuation_logprobs = [logprob.logprob for logprob in continuation_logprobs]
+
                     continuation_logprobs = sum(continuation_logprobs)
                     logprobs_doc.append(continuation_logprobs)
                     argmax_doc.append(bool_score)
@@ -645,6 +636,8 @@ class AsyncVLLMModel(VLLMModel):
     is_async = True
 
     def cleanup(self):
+        if self.model is not None:
+            del self.model
         gc.collect()
         destroy_distributed_environment()
         torch.cuda.empty_cache()
