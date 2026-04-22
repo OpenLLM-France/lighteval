@@ -5,7 +5,7 @@ line-length = 119
 [tool.ruff.lint]
 # Enable pycodestyle (`E`) and Pyflakes (`F`) codes by default.
 # Never enforce `E501` (line length violations).
-ignore = ["E501", "D100", "D101", "D102", "D103", "D104", "D415", "D105", "DOC501", "DOC201"]
+ignore = ["E501", "D100", "D101", "D102", "D103", "D104", "D415", "D105", "DOC501", "DOC201", "CPY001"]
 select = ["C", "E", "F", "I", "W", "CPY", "D417", "DOC"]
 preview = true
 
@@ -30,9 +30,12 @@ build-backend = "setuptools.build_meta"
 [tool.setuptools.packages.find]
 where = ["src"]
 
+[tool.setuptools.package-data]
+lighteval = ["py.typed"]
+
 [project]
 name = "lighteval"
-version = "0.11.1.dev0"
+version = "0.13.1.dev0"
 authors = [
   { name="Nathan Habib", email="nathan.habib@huggingface.com" },
   { name="Clémentine Fourrier", email="clementine@huggingface.com" },
@@ -56,7 +59,9 @@ classifiers = [
 keywords = ["evaluation", "nlp", "llm"]
 dependencies = [
     # Base dependencies
-    "transformers>=4.54.0,<4.57.2",
+    "transformers>=4.54.0",
+    "inspect-ai>=0.3.140",
+    "openai",
     "accelerate",
     "huggingface_hub[hf_xet]>=0.30.2",
     "torch>=2.0,<3.0",
@@ -66,7 +71,7 @@ dependencies = [
     "numpy>=2",  # pinned to avoid incompatibilities
     "hf-xet>=1.1.8",  # pinned to avoid failing test suite
     # Prettiness
-    "typer",
+    "typer>=0.20.0",
     "termcolor==2.3.0",
     "pytablewriter",
     "rich",
@@ -98,21 +103,19 @@ nanotron = [
   "tensorboardX"
 ]
 tensorboardX = ["tensorboardX"]
-vllm = [
-  "vllm>=0.10.0", # ,<0.10.2",
-  "ray",
-  "more_itertools"
-]
+vllm = ["vllm>=0.11.0", "ray", "more_itertools"]
 sglang = ["sglang"]
 quality = ["ruff>=v0.11.0","pre-commit"]
 tests = ["pytest>=7.4.0","deepdiff","pip>=25.2"]
-dev = ["lighteval[accelerate,quality,tests,multilingual,math,extended_tasks,vllm]"]
+dev = ["lighteval[quality,tests]"]
+dev-gpu = ["lighteval[dev,multilingual,math,extended_tasks,vllm]"]
 docs = ["hf-doc-builder", "watchdog"]
 extended_tasks = [
   "langdetect", # ifeval
   "openai>1.87", # llm as a judge using openai models
   "tiktoken",
-  "emoji", "spacy", "syllapy"  # ifbench
+  "emoji", "spacy", "syllapy",  # ifbench
+  "evaluate", # slr_bench
 ]
 s3 = ["s3fs"]
 multilingual = [

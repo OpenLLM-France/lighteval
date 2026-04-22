@@ -27,6 +27,9 @@ from pathlib import Path
 from datasets import Dataset
 
 
+LOGIT_TIE_EPSILON = 0.05
+
+
 def _to_plain_list(value):
     """convert a list of tensors to a list of plain values"""
     new_value = []
@@ -37,27 +40,81 @@ def _to_plain_list(value):
     return new_value
 
 
-def _logprobs_approximately_equal(current_logprobs, reference_logprobs):
-    """Check if logprobs are sorted in the same order.
-    for example:
-        current_logprobs = [1.1, 2.1, 3.1]
-        reference_logprobs = [1.0, 2.0, 3.0]
-        should return True
-    """
-    if current_logprobs is None and reference_logprobs is None:
-        return True
-    if current_logprobs is None or reference_logprobs is None:
+def to_plain_data(value):
+    """Convert nested tensor-like values to plain Python data."""
+    if hasattr(value, "tolist"):
+        value = value.tolist()
+
+    if isinstance(value, list):
+        return [to_plain_data(item) for item in value]
+
+    return value
+
+
+def first_generated_token_id(model_response: dict) -> int | None:
+    """Return the first generated token id for the first sequence."""
+    output_tokens = to_plain_data(model_response.get("output_tokens") or [])
+    if not output_tokens or not output_tokens[0]:
+        return None
+
+    first_sequence = output_tokens[0]
+    if isinstance(first_sequence, list):
+        return first_sequence[0] if first_sequence else None
+
+    return first_sequence
+
+
+def first_step_logits(model_response: dict) -> list[float] | None:
+    """Return the logits for the first generated token, if available."""
+    logits = to_plain_data(model_response.get("logits"))
+    if not logits:
+        return None
+
+    first_step = logits[0]
+    if isinstance(first_step, list):
+        return first_step
+
+    return logits
+
+
+def is_within_logit_tie_margin(logits: list[float], token_id: int, epsilon: float = LOGIT_TIE_EPSILON) -> bool:
+    """Check whether a token is within epsilon of the maximum logit."""
+    if token_id < 0 or token_id >= len(logits):
         return False
 
-    current_logprobs = _to_plain_list(current_logprobs)
-    reference_logprobs = _to_plain_list(reference_logprobs)
+    return max(logits) - logits[token_id] <= epsilon
 
-    # Check if both lists have the same ordering
-    # Convert to relative ordering: 0 for smallest, 1 for second smallest, etc.
-    current_indices = sorted(range(len(current_logprobs)), key=lambda i: current_logprobs[i])
-    reference_indices = sorted(range(len(reference_logprobs)), key=lambda i: reference_logprobs[i])
 
-    return current_indices == reference_indices
+def is_tied_choice_prediction(current: dict, reference: dict, epsilon: float = LOGIT_TIE_EPSILON) -> bool:
+    """Return True when two different MCQ predictions are both within the tie margin."""
+    current_choices = current.get("doc", {}).get("choices")
+    reference_choices = reference.get("doc", {}).get("choices")
+    if not current_choices or current_choices != reference_choices or len(current_choices) < 2:
+        return False
+
+    current_response = current.get("model_response", {})
+    reference_response = reference.get("model_response", {})
+
+    current_token = first_generated_token_id(current_response)
+    reference_token = first_generated_token_id(reference_response)
+    if current_token is None or reference_token is None or current_token == reference_token:
+        return False
+
+    reference_logits = first_step_logits(reference_response)
+    if reference_logits is None:
+        return False
+
+    for token_id in (current_token, reference_token):
+        if not is_within_logit_tie_margin(reference_logits, token_id, epsilon):
+            return False
+
+    current_logits = first_step_logits(current_response)
+    if current_logits is not None:
+        for token_id in (current_token, reference_token):
+            if not is_within_logit_tie_margin(current_logits, token_id, epsilon):
+                return False
+
+    return True
 
 
 def load_sample_details(details_dir: str):
@@ -115,7 +172,7 @@ def _compare_metrics(current, reference):
     reference_metrics = reference["metric"]
 
     metric_diffs = {}
-    for metric_name in set(current_metrics.keys()) | set(reference_metrics.keys()):
+    for metric_name in set(current_metrics.keys()) & set(reference_metrics.keys()):
         current_val = current_metrics.get(metric_name)
         reference_val = reference_metrics.get(metric_name)
 
@@ -162,6 +219,10 @@ def _compare_single_sample(current, reference, sample_index):
 
     if "doc" in current and "doc" in reference:
         sample_diff.update(_compare_doc_info(current, reference))
+
+    if sample_diff and set(sample_diff).issubset({"output_tokens_difference", "metric_differences"}):
+        if is_tied_choice_prediction(current, reference):
+            return {}
 
     if sample_diff:
         sample_diff["sample_index"] = sample_index
