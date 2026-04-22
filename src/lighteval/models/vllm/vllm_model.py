@@ -48,8 +48,7 @@ logger = logging.getLogger(__name__)
 if is_package_available("vllm"):
     import ray
     from more_itertools import distribute
-    from vllm import LLM, RequestOutput, SamplingParams
-    from vllm import TokensPrompt
+    from vllm import LLM, RequestOutput, SamplingParams, TokensPrompt
     from vllm.distributed.parallel_state import (
         destroy_distributed_environment,
         destroy_model_parallel,
@@ -184,6 +183,7 @@ class VLLMModelConfig(ModelConfig):
                     f"decode_context_parallel_size ({self.decode_context_parallel_size})."
                 )
         return self
+
     gpu_memory_utilization: NonNegativeFloat = 0.9  # lower this if you are running out of memory
     enable_prefix_caching: bool = None  # whether to enable prefix caching to speed up generation. May use more memory. Should be disabled for LFM2
     max_model_length: PositiveInt | None = (
@@ -268,7 +268,7 @@ class VLLMModel(LightevalModel):
     def max_length(self) -> int:
         return self._max_length
 
-    def _create_auto_model(self, config: VLLMModelConfig) -> Optional[LLM]:
+    def _create_auto_model(self, config: VLLMModelConfig) -> Optional[LLM]:  # noqa: C901
         """Creates an instance of the pretrained HF model.
 
         Args:
@@ -493,17 +493,20 @@ class VLLMModel(LightevalModel):
             sampling_params.prompt_logprobs = 1
             sampling_params.max_tokens = 1
             sampling_params.detokenize = False
-            sampling_params.skip_reading_prefix_cache = True # To avoid issues with logprobs when using prefix caching (see __post_init__ method of SamplingParams)
+            sampling_params.skip_reading_prefix_cache = True  # To avoid issues with logprobs when using prefix caching (see __post_init__ method of SamplingParams)
 
         if self.data_parallel_size > 1:
 
-            @ray.remote(num_gpus=self.tensor_parallel_size * self.pipeline_parallel_size * self.prefill_context_parallel_size)
+            @ray.remote(
+                num_gpus=self.tensor_parallel_size * self.pipeline_parallel_size * self.prefill_context_parallel_size
+            )
             def run_inference_one_model(model_args: dict, sampling_params: SamplingParams, requests):
                 llm = LLM(**model_args)
                 return llm.generate(
                     # prompt_token_ids=requests, # vllm 0.10.1
                     [TokensPrompt(prompt_token_ids=request) for request in requests],
-                    sampling_params=sampling_params)
+                    sampling_params=sampling_params,
+                )
 
             # dispatch requests to all self.data_parallel_size workers, in interleaved fashion
             # interleaved important to balance context lengths across workers

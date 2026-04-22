@@ -23,8 +23,8 @@
 import logging
 import random
 from dataclasses import asdict, dataclass, field
-from typing import Callable
 from functools import partial
+from typing import Callable
 
 from datasets import DatasetDict, load_dataset
 from huggingface_hub import TextGenerationInputGrammarType
@@ -368,16 +368,12 @@ class LightevalTask:
         Returns:
             list[Doc]: List of documents ready for evaluation with few-shot examples
                 and generation parameters configured.
-
-        Raises:
-            ValueError: If no documents are available for evaluation.
         """
         eval_docs = self.eval_docs()
 
         if len(eval_docs) == 0:
             logger.warning(f"Task {self.name} has no documents to evaluate skipping.")
             return None
-            # raise ValueError(f"Task {self.name} has no documents to evaluate skipping.")
 
         n_samples = min(max_samples, len(eval_docs)) if max_samples else len(eval_docs)
         rnd = random.Random()
@@ -461,7 +457,6 @@ class LightevalTask:
                 data_dir=task.dataset_config_name,
                 revision=task.dataset_revision,
             )
-
 
         if task.dataset_filter is not None:
             dataset = dataset.filter(task.dataset_filter)

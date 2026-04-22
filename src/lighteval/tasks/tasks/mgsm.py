@@ -36,9 +36,7 @@ MGSM_METRICS = [
             "normalize_pred": helm_normalizer,
         }
     ),
-    Metrics.expr_gold_metric(
-        sample_params={"normalize_gold": helm_normalizer, "normalize_pred": helm_normalizer}
-    ),
+    Metrics.expr_gold_metric(sample_params={"normalize_gold": helm_normalizer, "normalize_pred": helm_normalizer}),
 ]
 
 

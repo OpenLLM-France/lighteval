@@ -81,7 +81,7 @@ def process_llama_guard_response(response):
     response = lines[0].strip().lower()
     if response not in ["safe", "unsafe"]:
         logger.warning(f"Unexpected Llama Guard response: {response}")
-    is_safe = (response == "safe")
+    is_safe = response == "safe"
     return int(is_safe)
 
 
@@ -121,9 +121,7 @@ class JudgeLLMLlamaGuard(JudgeLLM):
         # Prevent evaluate_answer_batch from deleting the vLLM engine after this call,
         # so the second call can reuse it.
         pipe_ref = self.judge.pipe
-        scores, _, judgements = self.judge.evaluate_answer_batch(
-            questions, predictions, [None] * n, golds
-        )
+        scores, _, judgements = self.judge.evaluate_answer_batch(questions, predictions, [None] * n, golds)
         self.judge.pipe = pipe_ref
 
         # Second batch: without context (neutral prompt)

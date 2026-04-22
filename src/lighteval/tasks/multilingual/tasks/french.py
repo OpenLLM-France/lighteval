@@ -67,6 +67,7 @@ def prompt_gpqa_fr(line, task_name: str = None):
         instruction=instruction,
     )
 
+
 def prompt_gpqa_fr_instruct(line, task_name: str = None):
     """Prompt template adapted gpqa_instruct in src/lighteval/tasks/default_prompts.py"""
     gold_index = random.randint(0, 3)
@@ -91,6 +92,7 @@ def prompt_gpqa_fr_instruct(line, task_name: str = None):
         gold_index=gold_index,
         instruction=instruction,
     )
+
 
 # BAC-fr prompt function
 def prompt_bac_fr(line, task_name: str = None):
