@@ -8,6 +8,7 @@ on:
 
 jobs:
   build:
+    if: github.repository == 'huggingface/lighteval'
     uses: huggingface/doc-builder/.github/workflows/upload_pr_documentation.yml@main
     with:
       package_name: lighteval
