@@ -21,37 +21,36 @@
 # SOFTWARE.
 
 """
-AdvBench red-teaming benchmark.
+Safety red-teaming benchmarks.
 
 Evaluates model safety by measuring how often a model refuses harmful prompts.
 Uses Llama Guard as a judge to classify responses as safe or unsafe.
 
+Benchmarks:
+    - advbench (walledai/AdvBench)
+    - hexphi:{category} (LLM-Tuning-Safety/HEx-PHI, 10 categories, averaged across category when no subset is specified)
+
 Metric: safety_rate — fraction of responses judged safe (higher is better).
 
 Usage:
-    lighteval vllm "model_name=..." "community|advbench|0" --custom-tasks community_tasks/advbench.py
+    lighteval vllm "model_name=..." "community|advbench|0" --custom-tasks community_tasks/safety.py
+    lighteval vllm "model_name=..." "community|hexphi:illegal_activity|0" --custom-tasks community_tasks/safety.py
 """
 
 import logging
 
 import numpy as np
+from datasets import DatasetDict
+from datasets import load_dataset as _hf_load_dataset
+from huggingface_hub import hf_hub_download
 
 from lighteval.metrics.metrics_sample import JudgeLLM, SampleLevelComputation
 from lighteval.metrics.utils.metric_utils import SampleLevelMetric, SampleLevelMetricGrouping
-from lighteval.tasks.lighteval_task import LightevalTaskConfig
+from lighteval.tasks.lighteval_task import LightevalTask, LightevalTaskConfig
 from lighteval.tasks.requests import Doc, SamplingMethod
 
 
 logger = logging.getLogger(__name__)
-
-
-def advbench_prompt(line, task_name: str = None):
-    return Doc(
-        task_name=task_name,
-        query=line["prompt"],
-        choices=None,
-        gold_index=None,
-    )
 
 
 def llama_guard_template(question, answer, options=None, gold=None):
@@ -143,8 +142,8 @@ class JudgeLLMLlamaGuard(JudgeLLM):
         return metrics
 
 
-llm_judge_advbench = SampleLevelMetricGrouping(
-    metric_name=["llm_judge_advbench"],
+llm_judge_safety = SampleLevelMetricGrouping(
+    metric_name=["llm_judge_safety"],
     higher_is_better={
         "safety_rate_llama_guard": True,
         "safety_rate_no_context_llama_guard": True,
@@ -180,13 +179,33 @@ dummy_metric = SampleLevelMetric(
 )
 
 
+# ---------------------------------------------------------------------------
+# AdvBench (https://huggingface.co/datasets/walledai/AdvBench)
+# ---------------------------------------------------------------------------
+# 520 harmful behaviors introduced by Zou et al. (2023) in "Universal and
+# Transferable Adversarial Attacks on Aligned Language Models". Each example
+# is a short adversarial instruction paired with a target affirmative prefix;
+# only the `prompt` column is used here. The dataset has a single `default`
+# subset exposed under the `train` split, so it loads cleanly with the default
+# HF loader — no custom handling required.
+
+
+def advbench_prompt(line, task_name: str = None):
+    return Doc(
+        task_name=task_name,
+        query=line["prompt"],
+        choices=None,
+        gold_index=None,
+    )
+
+
 advbench_task = LightevalTaskConfig(
     name="advbench",
     suite=["community"],
     prompt_function=advbench_prompt,
     hf_repo="walledai/AdvBench",
     hf_subset="default",
-    metrics=[llm_judge_advbench],
+    metrics=[llm_judge_safety],
     hf_avail_splits=["train"],
     evaluation_splits=["train"],
     generation_size=1024,
@@ -208,4 +227,102 @@ advbench_noeval_task = LightevalTaskConfig(
     version="0.1",
 )
 
-TASKS_TABLE = [advbench_task, advbench_noeval_task]
+
+# ---------------------------------------------------------------------------
+# HEx-PHI (https://huggingface.co/datasets/LLM-Tuning-Safety/HEx-PHI)
+# ---------------------------------------------------------------------------
+# 330 harmful instructions split across 10 prohibited-use categories.
+# The dataset ships as headerless CSVs (one instruction per line, one file per
+# category), so the default HF loader cannot infer a schema — we fetch each
+# CSV via hf_hub_download and re-load it with an explicit column name.
+
+HEXPHI_REPO = "LLM-Tuning-Safety/HEx-PHI"
+
+# task-name suffix -> CSV filename in the HF repo
+HEXPHI_CATEGORIES = {
+    "illegal_activity": "category_1.csv",
+    "hate_harass_violence": "category_3.csv",
+    "malware": "category_4.csv",
+    "physical_harm": "category_5.csv",
+    "economic_harm": "category_6.csv",
+    "fraud_deception": "category_7.csv",
+    "adult_content": "category_8.csv",
+    "political_campaigning": "category_9.csv",
+    "privacy_violation_activity": "category_10.csv",
+    "tailored_financial_advice": "category_11.csv",
+}
+
+
+_original_download_dataset_worker = LightevalTask.download_dataset_worker
+
+
+@staticmethod
+def _patched_download_dataset_worker(task: LightevalTask) -> DatasetDict:
+    """Intercept HEx-PHI loads; pass everything else through unchanged.
+
+    HEx-PHI CSVs have no header, and the per-category files carry different
+    first rows, so HF's default csv loader fails with DatasetGenerationCastError.
+    We download the file for the requested category and load it with an
+    explicit column name.
+    """
+    if task.dataset_path == HEXPHI_REPO:
+        suffix = task.name.split(":", 1)[1] if ":" in task.name else ""
+        filename = HEXPHI_CATEGORIES.get(suffix)
+        if filename is None:
+            raise ValueError(f"Unknown HEx-PHI category in task name: {task.name!r}")
+        local_path = hf_hub_download(
+            repo_id=HEXPHI_REPO,
+            filename=filename,
+            repo_type="dataset",
+            revision=task.dataset_revision,
+        )
+        dataset = _hf_load_dataset(
+            "csv",
+            data_files={"train": local_path},
+            column_names=["prompt"],
+        )
+        if task.dataset_filter is not None:
+            dataset = dataset.filter(task.dataset_filter)
+        return dataset
+    return _original_download_dataset_worker(task)
+
+
+LightevalTask.download_dataset_worker = _patched_download_dataset_worker
+
+
+hexphi_tasks = [
+    LightevalTaskConfig(
+        name=f"hexphi:{suffix}",
+        suite=["community"],
+        prompt_function=advbench_prompt,
+        hf_repo=HEXPHI_REPO,
+        hf_subset="default",
+        metrics=[llm_judge_safety],
+        hf_avail_splits=["train"],
+        evaluation_splits=["train"],
+        generation_size=1024,
+        stop_sequence=[],
+        version="0.1",
+    )
+    for suffix in HEXPHI_CATEGORIES
+]
+
+hexphi_noeval_tasks = [
+    LightevalTaskConfig(
+        name=f"hexphi_noeval:{suffix}",
+        suite=["community"],
+        prompt_function=advbench_prompt,
+        hf_repo=HEXPHI_REPO,
+        hf_subset="default",
+        metrics=[dummy_metric],
+        hf_avail_splits=["train"],
+        evaluation_splits=["train"],
+        generation_size=1024,
+        stop_sequence=[],
+        version="0.1",
+    )
+    for suffix in HEXPHI_CATEGORIES
+]
+
+
+TASKS_TABLE = [advbench_task, advbench_noeval_task, *hexphi_tasks, *hexphi_noeval_tasks]
