@@ -145,7 +145,7 @@ def get_translation_prompt_function(
             for text in as_list(input_data["target_text"])
         ]
 
-        return continuation_prompt_fn(
+        doc = continuation_prompt_fn(
             {
                 "instruction": input_data.get("instruction", ""),
                 "context": context,
@@ -154,5 +154,12 @@ def get_translation_prompt_function(
             },
             task_name,
         )
+
+        if doc is not None:
+            if doc.specific is None:
+                doc.specific = {}
+            doc.specific["source"] = input_data["source_text"]
+
+        return doc
 
     return translation_prompt

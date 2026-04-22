@@ -22,8 +22,22 @@ https://arxiv.org/abs/2210.03057
 """
 
 from lighteval.metrics.metrics import Metrics
+from lighteval.metrics.normalizations import helm_normalizer
 from lighteval.tasks.lighteval_task import LightevalTaskConfig
 from lighteval.tasks.requests import Doc
+
+
+MGSM_HF_REVISION = "2e3d3e94b252b3a5829ed998a4f6229e15adb1a7"
+MGSM_METRICS = [
+    Metrics.exact_match(
+        sample_params={
+            "type_exact_match": "suffix",
+            "normalize_gold": helm_normalizer,
+            "normalize_pred": helm_normalizer,
+        }
+    ),
+    Metrics.expr_gold_metric(sample_params={"normalize_gold": helm_normalizer, "normalize_pred": helm_normalizer}),
+]
 
 
 def mgsm_prompt(line, question_key, answer_key, task_name: str = None):
@@ -107,13 +121,14 @@ mgsm_en = LightevalTaskConfig(
     prompt_function=mgsm_en_prompt,
     hf_repo="juletxara/mgsm",
     hf_subset="en",
+    hf_revision=MGSM_HF_REVISION,
     hf_avail_splits=["train", "test"],
     evaluation_splits=["test"],
     few_shots_split=None,
     few_shots_select=None,
     generation_size=None,
-    metrics=[Metrics.exact_match],
-    stop_sequence=None,
+    metrics=MGSM_METRICS,
+    stop_sequence=["\n", "=", "Question="],
     version=0,
 )
 
@@ -122,13 +137,14 @@ mgsm_es = LightevalTaskConfig(
     prompt_function=mgsm_es_prompt,
     hf_repo="juletxara/mgsm",
     hf_subset="es",
+    hf_revision=MGSM_HF_REVISION,
     hf_avail_splits=["train", "test"],
     evaluation_splits=["test"],
     few_shots_split=None,
     few_shots_select=None,
     generation_size=None,
-    metrics=[Metrics.exact_match],
-    stop_sequence=None,
+    metrics=MGSM_METRICS,
+    stop_sequence=["\n", "=", "Pregunta="],
     version=0,
 )
 
@@ -137,13 +153,14 @@ mgsm_fr = LightevalTaskConfig(
     prompt_function=mgsm_fr_prompt,
     hf_repo="juletxara/mgsm",
     hf_subset="fr",
+    hf_revision=MGSM_HF_REVISION,
     hf_avail_splits=["train", "test"],
     evaluation_splits=["test"],
     few_shots_split=None,
     few_shots_select=None,
     generation_size=None,
-    metrics=[Metrics.exact_match],
-    stop_sequence=None,
+    metrics=MGSM_METRICS,
+    stop_sequence=["\n", "=", "Question="],
     version=0,
 )
 
@@ -152,13 +169,14 @@ mgsm_de = LightevalTaskConfig(
     prompt_function=mgsm_de_prompt,
     hf_repo="juletxara/mgsm",
     hf_subset="de",
+    hf_revision=MGSM_HF_REVISION,
     hf_avail_splits=["train", "test"],
     evaluation_splits=["test"],
     few_shots_split=None,
     few_shots_select=None,
     generation_size=None,
-    metrics=[Metrics.exact_match],
-    stop_sequence=None,
+    metrics=MGSM_METRICS,
+    stop_sequence=["\n", "=", "Frage="],
     version=0,
 )
 
@@ -167,13 +185,14 @@ mgsm_ru = LightevalTaskConfig(
     prompt_function=mgsm_ru_prompt,
     hf_repo="juletxara/mgsm",
     hf_subset="ru",
+    hf_revision=MGSM_HF_REVISION,
     hf_avail_splits=["train", "test"],
     evaluation_splits=["test"],
     few_shots_split=None,
     few_shots_select=None,
     generation_size=None,
-    metrics=[Metrics.exact_match],
-    stop_sequence=None,
+    metrics=MGSM_METRICS,
+    stop_sequence=["\n", "=", "Задача="],
     version=0,
 )
 
@@ -182,13 +201,14 @@ mgsm_zh = LightevalTaskConfig(
     prompt_function=mgsm_zh_prompt,
     hf_repo="juletxara/mgsm",
     hf_subset="zh",
+    hf_revision=MGSM_HF_REVISION,
     hf_avail_splits=["train", "test"],
     evaluation_splits=["test"],
     few_shots_split=None,
     few_shots_select=None,
     generation_size=None,
-    metrics=[Metrics.exact_match],
-    stop_sequence=None,
+    metrics=MGSM_METRICS,
+    stop_sequence=["\n", "=", "问题="],
     version=0,
 )
 
@@ -197,13 +217,14 @@ mgsm_ja = LightevalTaskConfig(
     prompt_function=mgsm_ja_prompt,
     hf_repo="juletxara/mgsm",
     hf_subset="ja",
+    hf_revision=MGSM_HF_REVISION,
     hf_avail_splits=["train", "test"],
     evaluation_splits=["test"],
     few_shots_split=None,
     few_shots_select=None,
     generation_size=None,
-    metrics=[Metrics.exact_match],
-    stop_sequence=None,
+    metrics=MGSM_METRICS,
+    stop_sequence=["\n", "=", "問題="],
     version=0,
 )
 
@@ -212,13 +233,14 @@ mgsm_th = LightevalTaskConfig(
     prompt_function=mgsm_th_prompt,
     hf_repo="juletxara/mgsm",
     hf_subset="th",
+    hf_revision=MGSM_HF_REVISION,
     hf_avail_splits=["train", "test"],
     evaluation_splits=["test"],
     few_shots_split=None,
     few_shots_select=None,
     generation_size=None,
-    metrics=[Metrics.exact_match],
-    stop_sequence=None,
+    metrics=MGSM_METRICS,
+    stop_sequence=["\n", "=", "โจทย์="],
     version=0,
 )
 
@@ -227,13 +249,14 @@ mgsm_sw = LightevalTaskConfig(
     prompt_function=mgsm_sw_prompt,
     hf_repo="juletxara/mgsm",
     hf_subset="sw",
+    hf_revision=MGSM_HF_REVISION,
     hf_avail_splits=["train", "test"],
     evaluation_splits=["test"],
     few_shots_split=None,
     few_shots_select=None,
     generation_size=None,
-    metrics=[Metrics.exact_match],
-    stop_sequence=None,
+    metrics=MGSM_METRICS,
+    stop_sequence=["\n", "=", "Swali="],
     version=0,
 )
 
@@ -242,13 +265,14 @@ mgsm_bn = LightevalTaskConfig(
     prompt_function=mgsm_bn_prompt,
     hf_repo="juletxara/mgsm",
     hf_subset="bn",
+    hf_revision=MGSM_HF_REVISION,
     hf_avail_splits=["train", "test"],
     evaluation_splits=["test"],
     few_shots_split=None,
     few_shots_select=None,
     generation_size=None,
-    metrics=[Metrics.exact_match],
-    stop_sequence=None,
+    metrics=MGSM_METRICS,
+    stop_sequence=["\n", "=", "প্রশ্ন="],
     version=0,
 )
 
@@ -257,13 +281,14 @@ mgsm_te = LightevalTaskConfig(
     prompt_function=mgsm_te_prompt,
     hf_repo="juletxara/mgsm",
     hf_subset="te",
+    hf_revision=MGSM_HF_REVISION,
     hf_avail_splits=["train", "test"],
     evaluation_splits=["test"],
     few_shots_split=None,
     few_shots_select=None,
     generation_size=None,
-    metrics=[Metrics.exact_match],
-    stop_sequence=None,
+    metrics=MGSM_METRICS,
+    stop_sequence=["\n", "=", "ప్రశ్న="],
     version=0,
 )
 

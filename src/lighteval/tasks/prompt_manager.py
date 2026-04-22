@@ -40,10 +40,17 @@ if TYPE_CHECKING:
 
 
 class PromptManager:
-    def __init__(self, use_chat_template: bool = False, tokenizer=None, system_prompt: str | None = None):
+    def __init__(
+        self,
+        use_chat_template: bool = False,
+        tokenizer=None,
+        system_prompt: str | None = None,
+        enable_thinking: bool | None = None,
+    ):
         self.use_chat_template = use_chat_template
         self.tokenizer = tokenizer
         self.system_prompt = system_prompt  # System prompt to be used in chat templates
+        self.enable_thinking = enable_thinking
 
     def prepare_prompt(self, doc: Doc) -> str:
         """Prepare a prompt from a document, either using chat template or plain text format.
@@ -79,10 +86,14 @@ class PromptManager:
         else:
             message = [message]
 
+        kwargs = {}
+        if self.enable_thinking is not None:
+            kwargs["enable_thinking"] = self.enable_thinking
         return self.tokenizer.apply_chat_template(
             message,
             tokenize=False,
             add_generation_prompt=True,
+            **kwargs,
         )
 
     def prepare_prompt_api(self, doc: Doc) -> list[dict[str, str]]:
@@ -129,10 +140,14 @@ class PromptManager:
         if tokenize:  # for local models
             assert self.tokenizer is not None, "Tokenizer must be set for chat template formatting."
 
+            kwargs = {}
+            if self.enable_thinking is not None:
+                kwargs["enable_thinking"] = self.enable_thinking
             return self.tokenizer.apply_chat_template(
                 messages,
                 tokenize=False,
                 add_generation_prompt=True,
+                **kwargs,
             )
 
         else:  # for apis

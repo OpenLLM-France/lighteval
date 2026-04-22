@@ -36,7 +36,7 @@ from lighteval.tasks.requests import Doc
 
 
 TEMPLATE = """
-Answer the following multiple choice question. The last line of your response should be of the following format: 'Answer: $LETTER' (without quotes) where LETTER is one of ABCD. Think step by step before answering.
+Answer the following multiple choice question. The last line of your response should be of the following format: 'Answer: $LETTER' (without quotes) where LETTER is one of {letters}. Think step by step before answering.
 
 {question}
 
@@ -46,17 +46,20 @@ Answer:""".strip()
 
 
 def mmlu_pro_prompt_function(line, task_name: str = None):
-    choices = "\n".join([f"{letter}: {choice}" for letter, choice in zip(ascii_uppercase, line["options"])])
+    n_options = len(line["options"])
+    letters = ascii_uppercase[:n_options]
+    choices_str = "\n".join([f"{letter}: {choice}" for letter, choice in zip(letters, line["options"])])
 
     query = TEMPLATE.format(
+        letters=letters,
         question=line["question"],
-        choices=choices,
+        choices=choices_str,
     )
 
     return Doc(
         task_name=task_name,
         query=query,
-        choices=ascii_uppercase[: len(choices)],
+        choices=list(letters),
         gold_index=line["answer_index"],
         instruction=query,
     )
@@ -80,4 +83,44 @@ mmlu_pro = LightevalTaskConfig(
     metrics=[Metrics.gpqa_instruct_metric],
 )
 
-TASKS_TABLE = [mmlu_pro]
+
+# Alternative handmade version without inspect_ai, kept for side-by-side comparison.
+def mmlu_pro_raw_prompt(line, task_name: str = None):
+    n_options = len(line["options"])
+    letters = ascii_uppercase[:n_options]
+    choices_str = "\n".join([f"{letter}: {choice}" for letter, choice in zip(letters, line["options"])])
+
+    instruction = (
+        "Answer the following multiple choice question. The last line of your response should be of the following"
+        f" format: 'Answer: $LETTER' (without quotes) where LETTER is one of {letters}."
+        " Think step by step before answering.\n\n"
+    )
+
+    query = instruction + f"{line['question']}\n\n{choices_str}\n\nAnswer:"
+
+    return Doc(
+        task_name=task_name,
+        query=query,
+        choices=list(letters),
+        gold_index=line["answer_index"],
+        instruction=instruction,
+    )
+
+
+mmlu_pro_raw = LightevalTaskConfig(
+    name="mmlu_pro_raw",
+    prompt_function=mmlu_pro_raw_prompt,
+    hf_repo="TIGER-Lab/MMLU-Pro",
+    hf_subset="default",
+    hf_revision="3373e0b32277875b8db2aa555a333b78a08477ea",
+    evaluation_splits=["test"],
+    few_shots_split="validation",
+    few_shots_select=None,
+    generation_size=4096,
+    metrics=[Metrics.gpqa_instruct_metric],
+    stop_sequence=None,
+    version=0,
+)
+
+
+TASKS_TABLE = [mmlu_pro, mmlu_pro_raw]

@@ -42,9 +42,11 @@ from lighteval.metrics.metrics_sample import (
     BLEURT,
     MRR,
     ROUGE,
+    RULER,
     AccGoldLikelihood,
     AvgAtN,
     BertScore,
+    COMETMetric,
     ExactMatches,
     Extractiveness,
     F1_score,
@@ -53,6 +55,7 @@ from lighteval.metrics.metrics_sample import (
     JudgeLLMSimpleQA,
     LoglikelihoodAcc,
     MajAtN,
+    MetricXMetric,
     PassAtK,
     Recall,
     StringDistance,
@@ -207,7 +210,6 @@ class Metrics(Enum):
         corpus_level_fn=np.mean,
         higher_is_better=True,
     )
-
     bleurt = SampleLevelMetric(
         metric_name="bleurt",
         sample_level_fn=BLEURT(),
@@ -234,6 +236,13 @@ class Metrics(Enum):
         sample_level_fn=GenerativePreparator(),
         category=SamplingMethod.GENERATIVE,
         corpus_level_fn=CorpusLevelTranslationMetric("chrf++"),
+        higher_is_better=True,
+    )
+    comet = SampleLevelMetric(
+        metric_name="comet",
+        sample_level_fn=COMETMetric(),
+        category=SamplingMethod.GENERATIVE,
+        corpus_level_fn=np.mean,
         higher_is_better=True,
     )
     copyright = SampleLevelMetricGrouping(
@@ -445,6 +454,13 @@ class Metrics(Enum):
         corpus_level_fn=MatthewsCorrCoef(),
         higher_is_better=True,
     )
+    metricx = SampleLevelMetric(
+        metric_name="metricx",
+        sample_level_fn=MetricXMetric(),
+        category=SamplingMethod.GENERATIVE,
+        corpus_level_fn=np.mean,
+        higher_is_better=False,
+    )
     mrr = SampleLevelMetric(
         metric_name="mrr",
         sample_level_fn=MRR(),
@@ -546,6 +562,20 @@ class Metrics(Enum):
     rougeLsum = SampleLevelMetric(
         metric_name="rougeLsum",
         sample_level_fn=ROUGE("rougeLsum"),
+        category=SamplingMethod.GENERATIVE,
+        corpus_level_fn=np.mean,
+        higher_is_better=True,
+    )
+    ruler_match_any = SampleLevelMetric(
+        metric_name="ruler_match",
+        sample_level_fn=RULER("any"),
+        category=SamplingMethod.GENERATIVE,
+        corpus_level_fn=np.mean,
+        higher_is_better=True,
+    )
+    ruler_match_all = SampleLevelMetric(
+        metric_name="ruler_match",
+        sample_level_fn=RULER("all"),
         category=SamplingMethod.GENERATIVE,
         corpus_level_fn=np.mean,
         higher_is_better=True,

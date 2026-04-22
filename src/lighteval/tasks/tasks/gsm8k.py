@@ -77,7 +77,7 @@ gsm8k = LightevalTaskConfig(
     evaluation_splits=["test"],
     few_shots_split=None,
     few_shots_select="random_sampling_from_train",
-    generation_size=256,
+    generation_size=2048,
     metrics=[
         Metrics.expr_gold_metric,
     ],

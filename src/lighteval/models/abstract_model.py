@@ -21,6 +21,7 @@
 # SOFTWARE.
 
 import json
+import os
 import re
 from abc import ABC, abstractmethod
 from typing import Optional, Union
@@ -86,7 +87,10 @@ class ModelConfig(BaseModel, extra="forbid"):
 
     generation_parameters: GenerationParameters = GenerationParameters()
     system_prompt: str | None = None
-    cache_dir: str = "~/.cache/huggingface/lighteval"
+    enable_thinking: bool | None = (
+        None  # whether to enable thinking mode in chat template (for models that support it). None means use the model's default.
+    )
+    cache_dir: str = os.path.join(os.environ.get("HF_HOME", "~/.cache/huggingface"), "lighteval")
 
     @classmethod
     def from_path(cls, path: str):
