@@ -40,6 +40,7 @@ from lighteval.metrics.metrics_sample import (
     BLEURT,
     MRR,
     ROUGE,
+    RULER,
     AccGoldLikelihood,
     AvgAtK,
     BertScore,
@@ -55,7 +56,6 @@ from lighteval.metrics.metrics_sample import (
     MetricXMetric,
     PassAtK,
     Recall,
-    RULER,
     StringDistance,
 )
 from lighteval.metrics.normalizations import bigbench_normalizer, remove_braces, remove_braces_and_strip

@@ -43,6 +43,7 @@ LETTER_INDICES = ["A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K", "L", "M
 INTEGER_INDICES = list(map(str, list(range(1, 27))))
 # fmt: on
 
+
 def ruler(line, task_name: str = None):
     query = line["input"]
     choices = line["outputs"]

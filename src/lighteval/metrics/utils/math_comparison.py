@@ -296,6 +296,7 @@ def is_equation(expr: Basic | MatrixBase) -> bool:
 
     Args:
         expr: The expression to check
+
     Returns:
         bool: True if expr is an equation, False otherwise
     """

@@ -80,7 +80,6 @@ class SampleCache:
 
         Args:
             model_config: Configuration for the model being cached
-            cache_dir: Directory to store cache files
         """
         self.model_config = model_config
         self.model_hash = self.get_model_hash(model_config)
@@ -216,7 +215,6 @@ class SampleCache:
 
         Args:
             sample: Raw sample data from cache, arrives as a dataframe row
-            sample_type: Type of sample being loaded
 
         Returns:
             Union[dict, ModelResponse]: Loaded sample in appropriate format for processing
@@ -363,7 +361,7 @@ def cached(sampling_method: SamplingMethod = None):  # noqa C901
     Decorator to cache method results based on Doc inputs.
 
     Args:
-        cache_type_name: Type of cache ("tokenization" or "predictions")
+        sampling_method: The sampling method used to key the cache (e.g. SamplingMethod.GENERATIVE).
 
     Usage:
         @cached(SamplingMethod.GENERATIVE)

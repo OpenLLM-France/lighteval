@@ -1103,7 +1103,7 @@ class TransformersModel(LightevalModel):
                         # 2d on num choices and max len
                         len_choice = gathered_len_choices[i]
                         batch_tokenized_continuations_processed.append(
-                            gathered_continuations[i][:num_choices,:len_choice]
+                            gathered_continuations[i][:num_choices, :len_choice]
                         )
                         # 1d on max len context
                         len_context = gathered_len_context[i]
@@ -1116,7 +1116,9 @@ class TransformersModel(LightevalModel):
                     tokenized_contexts_batch = batch_tokenized_contexts_processed[i]
                     tokenized_continuations_batch = batch_tokenized_continuations_processed[i]
                     # Remove padding (-1) from continuations
-                    tokenized_continuations_batch = [[t for t in tokens if t != -1] for tokens in tokenized_continuations_batch.tolist()]
+                    tokenized_continuations_batch = [
+                        [t for t in tokens if t != -1] for tokens in tokenized_continuations_batch.tolist()
+                    ]
                     answer = ModelResponse(
                         argmax_logits_eq_gold=[max_equal.cpu().item() for max_equal in max_equals_doc],
                         logprobs=[sum.cpu().item() for sum in logits_sum_doc],

@@ -79,6 +79,7 @@ def prompt_gpqa_fr(line, task_name: str = None):
         instruction=instruction,
     )
 
+
 def prompt_gpqa_fr_instruct(line, task_name: str = None):
     """Prompt template adapted gpqa_instruct in src/lighteval/tasks/default_prompts.py"""
     gold_index = random.randint(0, 3)
@@ -104,6 +105,7 @@ def prompt_gpqa_fr_instruct(line, task_name: str = None):
         instruction=instruction,
     )
 
+
 # BAC-fr prompt function
 def prompt_bac_fr(line, task_name: str = None):
     prompt = f"Enoncé: {line['enonce']}\n{line['instruction']}\n"
@@ -127,7 +129,7 @@ ifeval_fr_task = LightevalTaskConfig(
     name="ifeval-fr",
     prompt_function=prompt_ifeval_fr,  # must be defined in the file or imported from src/lighteval/tasks/tasks_prompt_formatting.py
     suite=["community"],
-    hf_repo="jzhang86/fr_ifeval", # "fr-gouv-coordination-ia/IFEval-fr",
+    hf_repo="jzhang86/fr_ifeval",  # "fr-gouv-coordination-ia/IFEval-fr",
     hf_subset="default",
     metrics=[ifeval_metrics],
     hf_avail_splits=["train"],

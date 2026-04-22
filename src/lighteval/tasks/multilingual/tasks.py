@@ -154,9 +154,9 @@ xnli2_tasks = [
             relations=["entailment", "contradiction"],
             formulation=formulation,
         ),
-        hf_filter=lambda line: line["label"] in [0, 2]
-        and line["premise"] is not None
-        and line["hypothesis"] is not None,
+        hf_filter=lambda line: (
+            line["label"] in [0, 2] and line["premise"] is not None and line["hypothesis"] is not None
+        ),
         hf_repo=f"Harsit/xnli2.0_train_{LangCodeLanguage(standardize_tag(language.value)).language_name().lower()}",
         hf_subset="default",
         evaluation_splits=["train"],
@@ -1669,8 +1669,9 @@ meta_mmlu_tasks = [
         hf_repo="meta-llama/Meta-Llama-3.1-8B-Instruct-evals",
         hf_subset=f"Llama-3.1-8B-Instruct-evals__multilingual_mmlu_{standardize_tag(language.value)}__details",
         hf_filter=partial(
-            lambda language, subset, line: line["subtask_name"]
-            == f"mmlu_{standardize_tag(language.value)}_chat.{subset}",
+            lambda language, subset, line: (
+                line["subtask_name"] == f"mmlu_{standardize_tag(language.value)}_chat.{subset}"
+            ),
             language,
             subset,
         ),
@@ -1844,11 +1845,14 @@ global_mmlu_tasks = [
         evaluation_splits=("test",),
         few_shots_split="dev",
         hf_filter=partial(
-            lambda subset, sensitivity_label, x: x["subject"].lower() == subset
-            and (
-                sensitivity_label == "ALL" or sensitivity_label in x["cultural_sensitivity_label"].replace("-", "UNK")
-            )
-            and all(x[f"option_{opt}"] is not None and x[f"option_{opt}"].strip() for opt in "abcd"),
+            lambda subset, sensitivity_label, x: (
+                x["subject"].lower() == subset
+                and (
+                    sensitivity_label == "ALL"
+                    or sensitivity_label in x["cultural_sensitivity_label"].replace("-", "UNK")
+                )
+                and all(x[f"option_{opt}"] is not None and x[f"option_{opt}"].strip() for opt in "abcd")
+            ),
             subset,
             sensitivity_label,
         ),
@@ -2855,9 +2859,11 @@ exams_tasks = [
         hf_subset="multilingual",
         # Weird bug in dataset
         hf_filter=partial(
-            lambda language, subject, line: line["answerKey"] != "@"
-            and line["info"]["language"] == LangCodeLanguage(standardize_tag(language.value)).language_name()
-            and line["info"]["subject"] == subject,
+            lambda language, subject, line: (
+                line["answerKey"] != "@"
+                and line["info"]["language"] == LangCodeLanguage(standardize_tag(language.value)).language_name()
+                and line["info"]["subject"] == subject
+            ),
             language,
             subject,
         ),
@@ -3828,10 +3834,12 @@ mkqa_tasks = [
         hf_subset="mkqa",
         hf_revision="325131889721ae0ed885b76ecb8011369d75abad",
         hf_filter=partial(
-            lambda language, subset, line: line["answers"][
-                "zh_cn" if language == Language.CHINESE else standardize_tag(language.value)
-            ][0]["type"]
-            == MKQA_TASK_TO_ID[subset],
+            lambda language, subset, line: (
+                line["answers"]["zh_cn" if language == Language.CHINESE else standardize_tag(language.value)][0][
+                    "type"
+                ]
+                == MKQA_TASK_TO_ID[subset]
+            ),
             language,
             subset,
         ),

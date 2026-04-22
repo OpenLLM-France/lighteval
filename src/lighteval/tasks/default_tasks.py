@@ -11034,7 +11034,13 @@ mgsm_en_lighteval = LightevalTaskConfig(
     few_shots_select=None,
     generation_size=None,
     metrics=[
-        Metrics.exact_match(sample_params={"type_exact_match": "suffix", "normalize_gold": helm_normalizer, "normalize_pred": helm_normalizer}),
+        Metrics.exact_match(
+            sample_params={
+                "type_exact_match": "suffix",
+                "normalize_gold": helm_normalizer,
+                "normalize_pred": helm_normalizer,
+            }
+        ),
         Metrics.expr_gold_metric(sample_params={"normalize_gold": helm_normalizer, "normalize_pred": helm_normalizer}),
     ],
     stop_sequence=["\n", "=", "Question="],
@@ -11053,7 +11059,13 @@ mgsm_es_lighteval = LightevalTaskConfig(
     few_shots_select=None,
     generation_size=None,
     metrics=[
-        Metrics.exact_match(sample_params={"type_exact_match": "suffix", "normalize_gold": helm_normalizer, "normalize_pred": helm_normalizer}),
+        Metrics.exact_match(
+            sample_params={
+                "type_exact_match": "suffix",
+                "normalize_gold": helm_normalizer,
+                "normalize_pred": helm_normalizer,
+            }
+        ),
         Metrics.expr_gold_metric(sample_params={"normalize_gold": helm_normalizer, "normalize_pred": helm_normalizer}),
     ],
     stop_sequence=["\n", "=", "Pregunta="],
@@ -11072,7 +11084,13 @@ mgsm_fr_lighteval = LightevalTaskConfig(
     few_shots_select=None,
     generation_size=None,
     metrics=[
-        Metrics.exact_match(sample_params={"type_exact_match": "suffix", "normalize_gold": helm_normalizer, "normalize_pred": helm_normalizer}),
+        Metrics.exact_match(
+            sample_params={
+                "type_exact_match": "suffix",
+                "normalize_gold": helm_normalizer,
+                "normalize_pred": helm_normalizer,
+            }
+        ),
         Metrics.expr_gold_metric(sample_params={"normalize_gold": helm_normalizer, "normalize_pred": helm_normalizer}),
     ],
     stop_sequence=["\n", "=", "Question="],
@@ -11091,7 +11109,13 @@ mgsm_de_lighteval = LightevalTaskConfig(
     few_shots_select=None,
     generation_size=None,
     metrics=[
-        Metrics.exact_match(sample_params={"type_exact_match": "suffix", "normalize_gold": helm_normalizer, "normalize_pred": helm_normalizer}),
+        Metrics.exact_match(
+            sample_params={
+                "type_exact_match": "suffix",
+                "normalize_gold": helm_normalizer,
+                "normalize_pred": helm_normalizer,
+            }
+        ),
         Metrics.expr_gold_metric(sample_params={"normalize_gold": helm_normalizer, "normalize_pred": helm_normalizer}),
     ],
     stop_sequence=["\n", "=", "Frage="],
@@ -11110,7 +11134,13 @@ mgsm_ru_lighteval = LightevalTaskConfig(
     few_shots_select=None,
     generation_size=None,
     metrics=[
-        Metrics.exact_match(sample_params={"type_exact_match": "suffix", "normalize_gold": helm_normalizer, "normalize_pred": helm_normalizer}),
+        Metrics.exact_match(
+            sample_params={
+                "type_exact_match": "suffix",
+                "normalize_gold": helm_normalizer,
+                "normalize_pred": helm_normalizer,
+            }
+        ),
         Metrics.expr_gold_metric(sample_params={"normalize_gold": helm_normalizer, "normalize_pred": helm_normalizer}),
     ],
     stop_sequence=["\n", "=", "\u0417\u0430\u0434\u0430\u0447\u0430="],
@@ -11129,7 +11159,13 @@ mgsm_zh_lighteval = LightevalTaskConfig(
     few_shots_select=None,
     generation_size=None,
     metrics=[
-        Metrics.exact_match(sample_params={"type_exact_match": "suffix", "normalize_gold": helm_normalizer, "normalize_pred": helm_normalizer}),
+        Metrics.exact_match(
+            sample_params={
+                "type_exact_match": "suffix",
+                "normalize_gold": helm_normalizer,
+                "normalize_pred": helm_normalizer,
+            }
+        ),
         Metrics.expr_gold_metric(sample_params={"normalize_gold": helm_normalizer, "normalize_pred": helm_normalizer}),
     ],
     stop_sequence=["\n", "=", "\u95ee\u9898="],
@@ -11148,7 +11184,13 @@ mgsm_ja_lighteval = LightevalTaskConfig(
     few_shots_select=None,
     generation_size=None,
     metrics=[
-        Metrics.exact_match(sample_params={"type_exact_match": "suffix", "normalize_gold": helm_normalizer, "normalize_pred": helm_normalizer}),
+        Metrics.exact_match(
+            sample_params={
+                "type_exact_match": "suffix",
+                "normalize_gold": helm_normalizer,
+                "normalize_pred": helm_normalizer,
+            }
+        ),
         Metrics.expr_gold_metric(sample_params={"normalize_gold": helm_normalizer, "normalize_pred": helm_normalizer}),
     ],
     stop_sequence=["\n", "=", "\u554f\u984c="],
@@ -11167,7 +11209,13 @@ mgsm_th_lighteval = LightevalTaskConfig(
     few_shots_select=None,
     generation_size=None,
     metrics=[
-        Metrics.exact_match(sample_params={"type_exact_match": "suffix", "normalize_gold": helm_normalizer, "normalize_pred": helm_normalizer}),
+        Metrics.exact_match(
+            sample_params={
+                "type_exact_match": "suffix",
+                "normalize_gold": helm_normalizer,
+                "normalize_pred": helm_normalizer,
+            }
+        ),
         Metrics.expr_gold_metric(sample_params={"normalize_gold": helm_normalizer, "normalize_pred": helm_normalizer}),
     ],
     stop_sequence=["\n", "=", "\u0e42\u0e08\u0e17\u0e22\u0e4c="],
@@ -11186,7 +11234,13 @@ mgsm_sw_lighteval = LightevalTaskConfig(
     few_shots_select=None,
     generation_size=None,
     metrics=[
-        Metrics.exact_match(sample_params={"type_exact_match": "suffix", "normalize_gold": helm_normalizer, "normalize_pred": helm_normalizer}),
+        Metrics.exact_match(
+            sample_params={
+                "type_exact_match": "suffix",
+                "normalize_gold": helm_normalizer,
+                "normalize_pred": helm_normalizer,
+            }
+        ),
         Metrics.expr_gold_metric(sample_params={"normalize_gold": helm_normalizer, "normalize_pred": helm_normalizer}),
     ],
     stop_sequence=["\n", "=", "Swali="],
@@ -11205,7 +11259,13 @@ mgsm_bn_lighteval = LightevalTaskConfig(
     few_shots_select=None,
     generation_size=None,
     metrics=[
-        Metrics.exact_match(sample_params={"type_exact_match": "suffix", "normalize_gold": helm_normalizer, "normalize_pred": helm_normalizer}),
+        Metrics.exact_match(
+            sample_params={
+                "type_exact_match": "suffix",
+                "normalize_gold": helm_normalizer,
+                "normalize_pred": helm_normalizer,
+            }
+        ),
         Metrics.expr_gold_metric(sample_params={"normalize_gold": helm_normalizer, "normalize_pred": helm_normalizer}),
     ],
     stop_sequence=["\n", "=", "\u09aa\u09cd\u09b0\u09b6\u09cd\u09a8="],
@@ -11224,7 +11284,13 @@ mgsm_te_lighteval = LightevalTaskConfig(
     few_shots_select=None,
     generation_size=None,
     metrics=[
-        Metrics.exact_match(sample_params={"type_exact_match": "suffix", "normalize_gold": helm_normalizer, "normalize_pred": helm_normalizer}),
+        Metrics.exact_match(
+            sample_params={
+                "type_exact_match": "suffix",
+                "normalize_gold": helm_normalizer,
+                "normalize_pred": helm_normalizer,
+            }
+        ),
         Metrics.expr_gold_metric(sample_params={"normalize_gold": helm_normalizer, "normalize_pred": helm_normalizer}),
     ],
     stop_sequence=["\n", "=", "\u0c2a\u0c4d\u0c30\u0c36\u0c4d\u0c28="],
