@@ -29,12 +29,18 @@ Uses Llama Guard as a judge to classify responses as safe or unsafe.
 Benchmarks:
     - advbench (walledai/AdvBench)
     - hexphi:{category} (LLM-Tuning-Safety/HEx-PHI, 10 categories, averaged across category when no subset is specified)
+    - harmbench_standard:{category}  (walledai/HarmBench, `standard` subset, 6 categories)
+    - harmbench_contextual:{category} (walledai/HarmBench, `contextual` subset, 6 categories)
 
 Metric: safety_rate — fraction of responses judged safe (higher is better).
 
 Usage:
-    lighteval vllm "model_name=..." "community|advbench|0" --custom-tasks community_tasks/safety.py
-    lighteval vllm "model_name=..." "community|hexphi:illegal_activity|0" --custom-tasks community_tasks/safety.py
+    lighteval vllm "model_name=..." "community|advbench|0"
+    lighteval vllm "model_name=..." "community|hexphi|0"
+    lighteval vllm "model_name=..." "community|hexphi:illegal_activity|0"
+    lighteval vllm "model_name=..." "community|harmbench_standard|0"
+    lighteval vllm "model_name=..." "community|harmbench_standard:cybercrime_intrusion|0"
+    lighteval vllm "model_name=..." "community|harmbench_contextual|0"
 """
 
 import logging
@@ -182,15 +188,12 @@ dummy_metric = SampleLevelMetric(
 # ---------------------------------------------------------------------------
 # AdvBench (https://huggingface.co/datasets/walledai/AdvBench)
 # ---------------------------------------------------------------------------
-# 520 harmful behaviors introduced by Zou et al. (2023) in "Universal and
-# Transferable Adversarial Attacks on Aligned Language Models". Each example
-# is a short adversarial instruction paired with a target affirmative prefix;
-# only the `prompt` column is used here. The dataset has a single `default`
-# subset exposed under the `train` split, so it loads cleanly with the default
-# HF loader — no custom handling required.
+# 520 harmful behaviors from Zou et al. (2023), "Universal and Transferable
+# Adversarial Attacks on Aligned Language Models". Each row has a `prompt` and
+# a `target` affirmative prefix; we use only `prompt`.
 
 
-def advbench_prompt(line, task_name: str = None):
+def regular_prompt(line, task_name: str = None):
     return Doc(
         task_name=task_name,
         query=line["prompt"],
@@ -202,7 +205,7 @@ def advbench_prompt(line, task_name: str = None):
 advbench_task = LightevalTaskConfig(
     name="advbench",
     suite=["community"],
-    prompt_function=advbench_prompt,
+    prompt_function=regular_prompt,
     hf_repo="walledai/AdvBench",
     hf_subset="default",
     metrics=[llm_judge_safety],
@@ -216,7 +219,7 @@ advbench_task = LightevalTaskConfig(
 advbench_noeval_task = LightevalTaskConfig(
     name="advbench_noeval",
     suite=["community"],
-    prompt_function=advbench_prompt,
+    prompt_function=regular_prompt,
     hf_repo="walledai/AdvBench",
     hf_subset="default",
     metrics=[dummy_metric],
@@ -294,7 +297,7 @@ hexphi_tasks = [
     LightevalTaskConfig(
         name=f"hexphi:{suffix}",
         suite=["community"],
-        prompt_function=advbench_prompt,
+        prompt_function=regular_prompt,
         hf_repo=HEXPHI_REPO,
         hf_subset="default",
         metrics=[llm_judge_safety],
@@ -311,7 +314,7 @@ hexphi_noeval_tasks = [
     LightevalTaskConfig(
         name=f"hexphi_noeval:{suffix}",
         suite=["community"],
-        prompt_function=advbench_prompt,
+        prompt_function=regular_prompt,
         hf_repo=HEXPHI_REPO,
         hf_subset="default",
         metrics=[dummy_metric],
@@ -325,4 +328,130 @@ hexphi_noeval_tasks = [
 ]
 
 
-TASKS_TABLE = [advbench_task, advbench_noeval_task, *hexphi_tasks, *hexphi_noeval_tasks]
+# ---------------------------------------------------------------------------
+# HarmBench (https://huggingface.co/datasets/walledai/HarmBench)
+# ---------------------------------------------------------------------------
+# 400 harmful behaviors from Mazeika et al. (2024), "HarmBench: A Standardized
+# Evaluation Framework for Automated Red Teaming and Robust Refusal". The HF
+# dataset exposes three configs (`standard`, `contextual`, `copyright`); the
+# `copyright` subset is deferred. The 6 semantic categories below are shared
+# across both wired subsets.
+
+HARMBENCH_CATEGORIES = [
+    "chemical_biological",
+    "cybercrime_intrusion",
+    "harassment_bullying",
+    "harmful",
+    "illegal",
+    "misinformation_disinformation",
+]
+
+
+def _harmbench_category_filter(category):
+    """Filter rows by category, capturing `category` eagerly.
+
+    Module-scope (not an inline lambda in the list-comp below) so each task
+    binds its own category — inline lambdas would all close over the loop
+    variable and collapse to the last category.
+    """
+    return lambda row: row["category"] == category
+
+
+def harmbench_contextual_prompt(line, task_name: str = None):
+    """Format a contextual HarmBench example for the target model.
+
+    Mirrors HarmBench's DirectRequest baseline
+    (baselines/direct_request/direct_request.py, `f"{context_str}\\n\\n---\\n\\n{behavior}"`)
+    so refusal rates stay comparable with published HarmBench numbers.
+    """
+    return Doc(
+        task_name=task_name,
+        query=f"{line['context']}\n\n---\n\n{line['prompt']}",
+        choices=None,
+        gold_index=None,
+    )
+
+
+harmbench_standard_tasks = [
+    LightevalTaskConfig(
+        name=f"harmbench_standard:{category}",
+        suite=["community"],
+        prompt_function=regular_prompt,
+        hf_repo="walledai/HarmBench",
+        hf_subset="standard",
+        hf_filter=_harmbench_category_filter(category),
+        metrics=[llm_judge_safety],
+        hf_avail_splits=["train"],
+        evaluation_splits=["train"],
+        generation_size=1024,
+        stop_sequence=[],
+        version="0.1",
+    )
+    for category in HARMBENCH_CATEGORIES
+]
+
+harmbench_standard_noeval_tasks = [
+    LightevalTaskConfig(
+        name=f"harmbench_standard_noeval:{category}",
+        suite=["community"],
+        prompt_function=regular_prompt,
+        hf_repo="walledai/HarmBench",
+        hf_subset="standard",
+        hf_filter=_harmbench_category_filter(category),
+        metrics=[dummy_metric],
+        hf_avail_splits=["train"],
+        evaluation_splits=["train"],
+        generation_size=1024,
+        stop_sequence=[],
+        version="0.1",
+    )
+    for category in HARMBENCH_CATEGORIES
+]
+
+harmbench_contextual_tasks = [
+    LightevalTaskConfig(
+        name=f"harmbench_contextual:{category}",
+        suite=["community"],
+        prompt_function=harmbench_contextual_prompt,
+        hf_repo="walledai/HarmBench",
+        hf_subset="contextual",
+        hf_filter=_harmbench_category_filter(category),
+        metrics=[llm_judge_safety],
+        hf_avail_splits=["train"],
+        evaluation_splits=["train"],
+        generation_size=1024,
+        stop_sequence=[],
+        version="0.1",
+    )
+    for category in HARMBENCH_CATEGORIES
+]
+
+harmbench_contextual_noeval_tasks = [
+    LightevalTaskConfig(
+        name=f"harmbench_contextual_noeval:{category}",
+        suite=["community"],
+        prompt_function=harmbench_contextual_prompt,
+        hf_repo="walledai/HarmBench",
+        hf_subset="contextual",
+        hf_filter=_harmbench_category_filter(category),
+        metrics=[dummy_metric],
+        hf_avail_splits=["train"],
+        evaluation_splits=["train"],
+        generation_size=1024,
+        stop_sequence=[],
+        version="0.1",
+    )
+    for category in HARMBENCH_CATEGORIES
+]
+
+
+TASKS_TABLE = [
+    advbench_task,
+    advbench_noeval_task,
+    *hexphi_tasks,
+    *hexphi_noeval_tasks,
+    *harmbench_standard_tasks,
+    *harmbench_standard_noeval_tasks,
+    *harmbench_contextual_tasks,
+    *harmbench_contextual_noeval_tasks,
+]
