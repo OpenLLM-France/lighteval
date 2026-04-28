@@ -334,7 +334,7 @@ class JudgeLM:
                         "caching": True,
                     }
                     if max_new_tokens is not None:
-                        kwargs["max_tokens"] = (max_new_tokens,)
+                        kwargs["max_tokens"] = max_new_tokens
 
                     response = litellm.completion(**kwargs)
                     text = response.choices[0].message.content
