@@ -118,10 +118,22 @@ class PromptManager:
         if self.system_prompt is not None:
             messages.append({"role": "system", "content": self.system_prompt})
 
+        # Opt-in: emit doc.instruction as a system role rather than prepending it
+        # to the user query. Tasks that need a per-row system message (e.g. RAG
+        # benchmarks where the retrieved context is row-specific) set
+        # `Doc.specific["instruction_as_system"] = True` in their prompt function.
+        instruction_as_system = bool((doc.specific or {}).get("instruction_as_system"))
+        if instruction_as_system and doc.instruction is not None:
+            if messages and messages[0]["role"] == "system":
+                messages[0]["content"] = messages[0]["content"] + "\n\n" + doc.instruction
+            else:
+                messages.insert(0, {"role": "system", "content": doc.instruction})
+            instruction_used = True
+
         # Add few-shot examples
         for ix, fewshot_sample in enumerate(doc.fewshot_samples):
             query = self._extract_query(fewshot_sample.query, fewshot_sample.instruction)
-            if ix == 0 and doc.instruction is not None:
+            if ix == 0 and doc.instruction is not None and not instruction_used:
                 instruction_used = True
                 query = doc.instruction + query
 
