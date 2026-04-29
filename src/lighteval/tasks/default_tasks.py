@@ -29,6 +29,7 @@ from lighteval.metrics.normalizations import (
     math_normalizer,
 )
 from lighteval.tasks.lighteval_task import LightevalTaskConfig
+from lighteval.tasks.requests import Doc
 from lighteval.tasks.templates.qa import get_qa_prompt_function
 from lighteval.utils.language import Language
 
@@ -16329,20 +16330,35 @@ sports_understanding_bigbench = LightevalTaskConfig(
     stop_sequence=["\n"],
     version=0,
 )
+SQUAD_V2_UNANSWERABLE = "unanswerable"
+
+
+def squad_v2_prompt(line, task_name: str | None = None):
+    answers = list({ans for ans in line["answers"]["text"] if len(ans) > 0})
+    is_unanswerable = len(answers) == 0
+    choices = [f" {SQUAD_V2_UNANSWERABLE}"] if is_unanswerable else [f" {ans}" for ans in answers]
+
+    return Doc(
+        task_name=task_name,
+        query=(
+            f"Context: {line['context']}\n"
+            f"Question: {line['question']}\n"
+            f'Answer with a span from the context, or "{SQUAD_V2_UNANSWERABLE}" '
+            "if the question cannot be answered.\n"
+            "Answer:"
+        ),
+        choices=choices,
+        gold_index=list(range(len(choices))),
+        specific={"text": line["context"]},
+    )
+
+
 squad_v2 = LightevalTaskConfig(
     name="squad_v2",
-    prompt_function=get_qa_prompt_function(
-        Language.ENGLISH,
-        lambda line: {
-            "question": line["question"],
-            "context": line["context"],
-            "choices": [ans for ans in line["answers"]["text"] if len(ans) > 0],
-        },
-    ),
+    prompt_function=squad_v2_prompt,
     suite=("lighteval",),
     hf_repo="rajpurkar/squad_v2",
     hf_subset="squad_v2",
-    hf_filter=lambda line: any(ans for ans in line["answers"]["text"] if len(ans) > 0),
     evaluation_splits=("validation",),
     few_shots_split="train",
     stop_sequence=["\n", "Question:", "question:"],
@@ -16357,6 +16373,7 @@ squad_v2 = LightevalTaskConfig(
         ),
         Metrics.f1_score(sample_params={"normalize_gold": helm_normalizer, "normalize_pred": helm_normalizer}),
     ),
+    version=2,
 )
 storycloze_2016_lighteval = LightevalTaskConfig(
     name="storycloze:2016",
