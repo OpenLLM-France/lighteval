@@ -51,8 +51,20 @@ class Exo7MCMetric(SampleLevelComputation):
     """
 
     def compute(self, model_response: ModelResponse, doc: Doc, **kwargs):
-        logprobs = model_response.logprobs
-        probs = np.exp(np.array(logprobs))
+        logprobs = np.array(model_response.logprobs)
+
+        # Length-normalize per choice. Prefer per-choice token counts from the
+        # model wrapper; fall back to character lengths of the formulation
+        # targets if the backend didn't populate output_tokens.
+        if model_response.output_tokens:
+            lengths = np.array([max(len(t), 1) for t in model_response.output_tokens])
+        else:
+            lengths = np.array([max(len(c), 1) for c in doc.choices])
+
+        norm_logprobs = logprobs / lengths
+
+        # Stability shift + softmax
+        probs = np.exp(norm_logprobs - np.max(norm_logprobs))
         probs_norm = probs / np.sum(probs)
 
         labels = np.array(doc.specific["labels"])
