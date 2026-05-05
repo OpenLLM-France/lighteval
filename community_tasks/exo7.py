@@ -84,6 +84,7 @@ exo7_mc_metric = SampleLevelMetric(
 
 
 _RESPONSE_RE = re.compile(r"(?:^|\n)\s*[Rr][ée]ponse\s*:?\s*([^\n]*)")
+_BOXED_RE = re.compile(r"\\boxed\s*\{([^}]*)\}")
 _LETTER_RE = re.compile(r"\b[A-Z]\b")
 
 
@@ -91,10 +92,11 @@ def _extract_letters(text: str, valid: set) -> set:
     """Extract the set of answer letters from a generative response.
 
     Prefers the last line starting with "Réponse :" (the instructed format);
-    otherwise falls back to the last non-empty line. Keeps only letters in
-    the valid set for this question. Uses word boundaries so isolated
-    capitals (e.g. "A, C") match but letters inside words ("Aucune", "Vrai")
-    do not.
+    failing that, the contents of the last ``\\boxed{...}`` (math-tuned
+    models like Qwen2.5-Math default to this); otherwise the last non-empty
+    line. Keeps only letters in the valid set. Uses word boundaries so
+    isolated capitals (e.g. "A, C") match but letters inside words
+    ("Aucune", "Vrai") do not.
     """
     if not text:
         return set()
@@ -102,8 +104,12 @@ def _extract_letters(text: str, valid: set) -> set:
     if matches:
         target = matches[-1].group(1)
     else:
-        lines = [line for line in text.strip().splitlines() if line.strip()]
-        target = lines[-1] if lines else ""
+        boxed = list(_BOXED_RE.finditer(text))
+        if boxed:
+            target = boxed[-1].group(1)
+        else:
+            lines = [line for line in text.strip().splitlines() if line.strip()]
+            target = lines[-1] if lines else ""
     return {c for c in _LETTER_RE.findall(target) if c in valid}
 
 
@@ -256,7 +262,7 @@ def _make_generative_task():
         evaluation_splits=["test"],
         few_shots_split=None,
         few_shots_select=None,
-        generation_size=16384,
+        generation_size=4096,
         metrics=[exo7_generative_f1_metric, exo7_generative_exact_metric],
         stop_sequence=[],
         version=0,
