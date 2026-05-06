@@ -94,9 +94,17 @@ class Exo7MCMetric(SampleLevelComputation):
         return float(np.sum(probs_norm[labels == 1]))
 
 
-exo7_mc_metric = SampleLevelMetric(
-    metric_name="acc",
-    sample_level_fn=Exo7MCMetric(),
+exo7_mc_metric_token = SampleLevelMetric(
+    metric_name="prob_mass_norm_token",
+    sample_level_fn=Exo7MCMetric(LogProbTokenNorm()),
+    category=SamplingMethod.LOGPROBS,
+    corpus_level_fn=np.mean,
+    higher_is_better=True,
+)
+
+exo7_mc_metric_char = SampleLevelMetric(
+    metric_name="prob_mass_norm_char",
+    sample_level_fn=Exo7MCMetric(LogProbCharNorm()),
     category=SamplingMethod.LOGPROBS,
     corpus_level_fn=np.mean,
     higher_is_better=True,
