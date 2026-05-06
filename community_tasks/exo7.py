@@ -73,17 +73,13 @@ class Exo7MCMetric(SampleLevelComputation):
     the total probability mass on the correct answers.
     """
 
-    def compute(self, model_response: ModelResponse, doc: Doc, **kwargs):
-        # Prefer per-choice token counts from the model wrapper; fall back to
-        # character normalization if the backend didn't populate output_tokens.
-        if model_response.output_tokens and all(len(t) > 0 for t in model_response.output_tokens):
-            normalization = LogProbTokenNorm()
-        else:
-            normalization = LogProbCharNorm()
+    def __init__(self, normalization):
+        self.normalization = normalization
 
+    def compute(self, doc: Doc, model_response: ModelResponse, **kwargs):
         norm_logprobs = np.array(
             normalize_log_probs(
-                normalization,
+                self.normalization,
                 choices_logprob=model_response.logprobs,
                 unconditioned_logprob=None,
                 choices_text=doc.choices,
