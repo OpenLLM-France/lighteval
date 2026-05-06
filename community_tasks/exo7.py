@@ -164,8 +164,7 @@ exo7_generative_exact_metric = SampleLevelMetric(
 # --- Prompt function ---
 
 INSTRUCTION = (
-    "Pour la question suivante, une ou plusieurs propositions peuvent être correctes. "
-    "Évaluez chaque proposition."
+    "Pour la question suivante, une ou plusieurs propositions peuvent être correctes. Évaluez chaque proposition."
 )
 
 
@@ -207,9 +206,7 @@ def _make_generative_prompt_fn():
         correct_letters = [letters[i] for i, label in enumerate(labels) if label == 1]
 
         instruction = GENERATIVE_INSTRUCTION_TEMPLATE.format(valid_letters=", ".join(letters))
-        choices_str = "\n".join(
-            f"{letter}) {choice.strip()}" for letter, choice in zip(letters, choices)
-        )
+        choices_str = "\n".join(f"{letter}) {choice.strip()}" for letter, choice in zip(letters, choices))
         query = f"{instruction}\n\n{line['question'].strip()}\n\n{choices_str}"
 
         doc = Doc(
