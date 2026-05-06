@@ -49,6 +49,7 @@ import re
 import numpy as np
 
 from lighteval.metrics.metrics_sample import SampleLevelComputation
+from lighteval.metrics.normalizations import LogProbCharNorm, LogProbTokenNorm, normalize_log_probs
 from lighteval.metrics.utils.metric_utils import SampleLevelMetric
 from lighteval.models.model_output import ModelResponse
 from lighteval.tasks.default_prompts import LETTER_INDICES
@@ -73,19 +74,23 @@ class Exo7MCMetric(SampleLevelComputation):
     """
 
     def compute(self, model_response: ModelResponse, doc: Doc, **kwargs):
-        logprobs = np.array(model_response.logprobs)
-
-        # Length-normalize per choice. Prefer per-choice token counts from the
-        # model wrapper; fall back to character lengths of the formulation
-        # targets if the backend didn't populate output_tokens.
-        if model_response.output_tokens:
-            lengths = np.array([max(len(t), 1) for t in model_response.output_tokens])
+        # Prefer per-choice token counts from the model wrapper; fall back to
+        # character normalization if the backend didn't populate output_tokens.
+        if model_response.output_tokens and all(len(t) > 0 for t in model_response.output_tokens):
+            normalization = LogProbTokenNorm()
         else:
-            lengths = np.array([max(len(c), 1) for c in doc.choices])
+            normalization = LogProbCharNorm()
 
-        norm_logprobs = logprobs / lengths
+        norm_logprobs = np.array(
+            normalize_log_probs(
+                normalization,
+                choices_logprob=model_response.logprobs,
+                unconditioned_logprob=None,
+                choices_text=doc.choices,
+                choices_tokens=model_response.output_tokens,
+            )
+        )
 
-        # Stability shift + softmax
         probs = np.exp(norm_logprobs - np.max(norm_logprobs))
         probs_norm = probs / np.sum(probs)
 
