@@ -173,7 +173,7 @@ def detect_refusal(response: str) -> bool:
         m = pat.search(response)
         if not m:
             continue
-        tail = response[m.end():]
+        tail = response[m.end() :]
         if _RESCUE_AFTER_REFUSAL_RE.search(tail):
             continue
         return True
@@ -334,7 +334,7 @@ def _split_system_context(system_content: str) -> str:
     for marker in _CONTEXT_MARKERS:
         start = system_content.find(marker)
         if start != -1:
-            context = system_content[start + len(marker):].rstrip()
+            context = system_content[start + len(marker) :].rstrip()
             if context.endswith("`"):
                 context = context[:-1].rstrip()
             return context
@@ -390,10 +390,7 @@ def _clean_applicable_values(values) -> list[float]:
     failure. Corpus metrics and stderr are therefore computed on this same
     applicable subset.
     """
-    return [
-        float(v) for v in values
-        if v is not None and not (isinstance(v, float) and np.isnan(v))
-    ]
+    return [float(v) for v in values if v is not None and not (isinstance(v, float) and np.isnan(v))]
 
 
 def _stderr(values: list[float]) -> float:
@@ -486,10 +483,7 @@ class RagLucioleSampleMetrics(SampleLevelComputation):
         # Distractor: any cited title that does not exactly match a gold
         # supporting fact. Includes both wrong-but-real chunks and
         # hallucinated titles that aren't in the context at all.
-        cited_distractor_count = sum(
-            1 for c in cited
-            if not any(_citation_match(c, g) for g in gold_titles)
-        )
+        cited_distractor_count = sum(1 for c in cited if not any(_citation_match(c, g) for g in gold_titles))
         distractor_rate = cited_distractor_count / len(cited) if cited else 0.0
 
         return {
@@ -682,9 +676,13 @@ rag_luciole_factual_judge = SampleLevelMetricGrouping(
 
 HF_REPO = os.getenv("RAG_LUCIOLE_HF_REPO", "Mvanypersele/luciole-rag-sft")
 DATASET_SUBSETS = [
-    "hotpotqa", "hotpotqa_fr",
-    "tatqa", "tatqav2",
-    "piaf", "newsquadfr", "squad2_fr_pragnakalp",
+    "hotpotqa",
+    "hotpotqa_fr",
+    "tatqa",
+    "tatqav2",
+    "piaf",
+    "newsquadfr",
+    "squad2_fr_pragnakalp",
 ]
 DATASET_EVAL_SPLITS = {
     "hotpotqa": "validation",

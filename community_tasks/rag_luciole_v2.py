@@ -347,9 +347,7 @@ def _format_chunk(title: str, document: str) -> str:
 
 
 def build_context(titles: list[str], documents: list[str]) -> str:
-    return "\n\n".join(
-        _format_chunk(str(t), str(d)) for t, d in zip(titles, documents)
-    )
+    return "\n\n".join(_format_chunk(str(t), str(d)) for t, d in zip(titles, documents))
 
 
 # ── prompt function ────────────────────────────────────────────────
@@ -449,10 +447,7 @@ def _clean_applicable_values(values) -> list[float]:
     on unanswerable rows); ``0.0`` means an applicable failure. Corpus metrics
     and stderr are computed on this same applicable subset.
     """
-    return [
-        float(v) for v in values
-        if v is not None and not (isinstance(v, float) and np.isnan(v))
-    ]
+    return [float(v) for v in values if v is not None and not (isinstance(v, float) and np.isnan(v))]
 
 
 def _stderr(values: list[float]) -> float:
@@ -545,10 +540,7 @@ class RagLucioleV2SampleMetrics(SampleLevelComputation):
         # Distractor: any cited title that does not exactly match a gold
         # supporting fact. Includes both wrong-but-real chunks and
         # hallucinated titles that aren't in the context at all.
-        cited_distractor_count = sum(
-            1 for c in cited
-            if not any(_citation_match(c, g) for g in gold_titles)
-        )
+        cited_distractor_count = sum(1 for c in cited if not any(_citation_match(c, g) for g in gold_titles))
         distractor_rate = cited_distractor_count / len(cited) if cited else 0.0
 
         return {
@@ -742,9 +734,12 @@ rag_luciole_v2_factual_judge = SampleLevelMetricGrouping(
 HF_REPO = os.getenv("RAG_LUCIOLE_V2_HF_REPO", "Mvanypersele/luciole_rag_benchmark")
 
 DATASET_SUBSETS = [
-    "hotpotqa", "hotpotqa_fr",
+    "hotpotqa",
+    "hotpotqa_fr",
     "tatqa",
-    "piaf", "newsquadfr", "squad2_fr_pragnakalp",
+    "piaf",
+    "newsquadfr",
+    "squad2_fr_pragnakalp",
 ]
 
 # Per-subset evaluation split. Defaults to "test" where available, falling
