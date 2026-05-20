@@ -48,12 +48,13 @@ rows).
 
 Prompt
 ------
-Built per row with a single citation rule (``<<quote>>...<</quote>>`` excerpts
-and a final ``References`` section using ``<<cite: "title">>``) and a single
-refusal rule that instructs the model to reply with one **canonical refusal
-phrase** verbatim. Detection of refusal is a substring match on that phrase,
-so any other phrasing counts as a failure to follow the refusal instruction.
-The prompt language (FR/EN) is detected per row from the query.
+Built per row with a single citation rule (each quoted excerpt is wrapped
+inline in ``<ref filename="title">...</ref>``, where ``title`` matches the
+``[title]`` header of the cited chunk in the context) and a single refusal
+rule that instructs the model to reply with one **canonical refusal phrase**
+verbatim. Detection of refusal is a substring match on that phrase, so any
+other phrasing counts as a failure to follow the refusal instruction. The
+prompt language (FR/EN) is detected per row from the query.
 
 Judge
 -----
@@ -83,13 +84,14 @@ logger = logging.getLogger(__name__)
 
 # ── citation extraction regex ──────────────────────────────────────
 
-# The prompt instructs a single citation syntax: ``<<cite: "title">>``. Any
-# other syntax in the model output is treated as a failure to follow the
-# citation instruction (lower precision/recall).
-_CITATION_TAG_RE = re.compile(r"<<cite\s*:\s*(.+?)\s*>>", re.IGNORECASE)
-# Inside a single ``<<cite: ...>>`` block, multiple titles may be quoted as
-# ``"A"`` and ``"B"`` (or with French guillemets); split them.
-_CITATION_QUOTED_INNER_RE = re.compile(r'[«"]\s*([^»"]+?)\s*[»"]')
+# The prompt instructs a single citation syntax: ``<ref filename="title">...</ref>``.
+# Any other syntax in the model output is treated as a failure to follow the
+# citation instruction (lower precision/recall). The ``filename`` attribute may
+# use single or double quotes.
+_CITATION_TAG_RE = re.compile(
+    r'<ref\s+filename\s*=\s*["\']([^"\']+)["\']\s*>',
+    re.IGNORECASE,
+)
 
 
 # ── refusal: canonical phrases ─────────────────────────────────────
@@ -132,25 +134,20 @@ def detect_refusal(response: str) -> bool:
 
 
 def extract_cited_titles(response: str) -> list[str]:
-    """Extract titles from ``<<cite: "title">>`` tags only.
+    """Extract titles from ``<ref filename="title">...</ref>`` tags only.
 
     Other citation syntaxes are intentionally not parsed: the prompt
     instructs this exact form, so unparsed citations count as
     instruction-following failures (lower precision/recall).
     """
-    titles: list[str] = []
-    for m in _CITATION_TAG_RE.finditer(response):
-        inner = m.group(1)
-        quoted = _CITATION_QUOTED_INNER_RE.findall(inner)
-        titles.extend(quoted if quoted else [inner.strip()])
-
     seen: set[str] = set()
     unique: list[str] = []
-    for t in titles:
-        norm = t.strip().lower()
+    for m in _CITATION_TAG_RE.finditer(response):
+        title = m.group(1).strip()
+        norm = title.lower()
         if norm and norm not in seen:
             seen.add(norm)
-            unique.append(t.strip())
+            unique.append(title)
     return unique
 
 
@@ -243,23 +240,20 @@ def _extract_json(text: str) -> dict:
 
 # ── prompt-building primitives ─────────────────────────────────────
 
-_QUOTE_BEGIN = "<<quote>>"
-_QUOTE_END = "<</quote>>"
-_CITE_TEMPLATE = '<<cite: "{title}">>'
+_REF_TEMPLATE = '<ref filename="{title}">{excerpt}</ref>'
 
 CITATION_INSTRUCTION = {
     "en": (
-        f"When quoting from the context, wrap the excerpt with `{_QUOTE_BEGIN}` and `{_QUOTE_END}`. "
-        f"Do **not** add citation markers after each quote. Instead, list all cited sources "
-        f"at the end of your response in a **References** section using "
-        f"`{_CITE_TEMPLATE.replace('{title}', 'source title')}` for each source."
+        "When quoting from the context, wrap each excerpt inline with "
+        f"`{_REF_TEMPLATE.replace('{title}', 'source title').replace('{excerpt}', 'excerpt')}`, "
+        "where `source title` matches the `[title]` header of the cited chunk in the context. "
+        "Do **not** add a separate References section."
     ),
     "fr": (
-        f"Lorsque vous citez le contexte, encadrez l'extrait avec `{_QUOTE_BEGIN}` et `{_QUOTE_END}`. "
-        f"N'ajoutez **pas** de marqueurs de citation après chaque citation. "
-        f"Listez toutes les sources citées à la fin de votre réponse dans une section "
-        f"**Références** en utilisant `{_CITE_TEMPLATE.replace('{title}', 'titre de la source')}` "
-        f"pour chaque source."
+        "Lorsque vous citez le contexte, encadrez chaque extrait en ligne avec "
+        f"`{_REF_TEMPLATE.replace('{title}', 'titre de la source').replace('{excerpt}', 'extrait')}`, "
+        "où `titre de la source` correspond à l'en-tête `[titre]` du document cité dans le contexte. "
+        "N'ajoutez **pas** de section Références séparée."
     ),
 }
 
