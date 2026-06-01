@@ -37,11 +37,11 @@ Row schema (one per example)
 
 Tasks
 -----
-One ``rag_luciole_v2:<subset>`` task per subset (``hotpotqa``, ``hotpotqa_fr``,
+One ``luciole_rag:<subset>`` task per subset (``hotpotqa``, ``hotpotqa_fr``,
 ``tatqa``, ``piaf``, ``newsquadfr``, ``squad2_fr_pragnakalp``). A deterministic
 md5-based partition on the row id drops the supporting chunks on a fraction of
 the answerable rows, turning them into synthetic unanswerables. The fraction
-is set by ``RAG_LUCIOLE_V2_DROP_RATIO`` (default 0.5). With ratio 0.0 the run
+is set by ``LUCIOLE_RAG_DROP_RATIO`` (default 0.5). With ratio 0.0 the run
 is pure answerable; with 1.0 it is pure unanswerable. One run fills both the
 answer/citation metrics (on kept rows) and the refusal metrics (on dropped
 rows).
@@ -59,7 +59,7 @@ prompt language (FR/EN) is detected per row from the query.
 Judge
 -----
 Optional LLM-as-judge factual evaluation, opt-in via
-``RAG_LUCIOLE_V2_USE_JUDGE=1``. Uses litellm by default; for a custom
+``LUCIOLE_RAG_USE_JUDGE=1``. Uses litellm by default; for a custom
 OpenAI-compatible endpoint set ``LLM_API_URL``, ``OPENAI_API_KEY`` and
 ``LLM_MODEL`` (with the ``openai/`` prefix).
 """
@@ -350,13 +350,13 @@ def build_context(titles: list[str], documents: list[str]) -> str:
 # from the environment at import time. 0.0 = keep all supports, 1.0 = drop
 # them all. The partition is deterministic per-id (md5-based) so reruns at
 # the same ratio yield identical samples.
-DROP_RATIO = float(os.getenv("RAG_LUCIOLE_V2_DROP_RATIO", "0.5"))
+DROP_RATIO = float(os.getenv("LUCIOLE_RAG_DROP_RATIO", "0.5"))
 
 # Present the kept chunks in a shuffled order to remove position bias (so the
 # gold chunks aren't always at a fixed slot). The shuffle is deterministic
 # per-id, so reruns yield identical orderings. Disable with
-# RAG_LUCIOLE_V2_SHUFFLE_CHUNKS=0.
-SHUFFLE_CHUNKS = os.getenv("RAG_LUCIOLE_V2_SHUFFLE_CHUNKS", "1").strip().lower() in ("1", "true", "yes", "on")
+# LUCIOLE_RAG_SHUFFLE_CHUNKS=0.
+SHUFFLE_CHUNKS = os.getenv("LUCIOLE_RAG_SHUFFLE_CHUNKS", "1").strip().lower() in ("1", "true", "yes", "on")
 
 
 def _hash_unit(key: str) -> float:
@@ -378,7 +378,7 @@ def _shuffle_deterministic(items: list, seed_key: str) -> list:
     return shuffled
 
 
-def rag_luciole_v2_prompt(line, task_name: str | None = None) -> Doc:
+def luciole_rag_prompt(line, task_name: str | None = None) -> Doc:
     """Convert one prompt-agnostic row into a lighteval Doc.
 
     A deterministic md5-based bucket on the row id decides whether to drop
@@ -397,7 +397,7 @@ def rag_luciole_v2_prompt(line, task_name: str | None = None) -> Doc:
 
     if len(retrieved) != len(titles):
         raise ValueError(
-            f"rag_luciole_v2_prompt: retrieved_documents/titles length mismatch "
+            f"luciole_rag_prompt: retrieved_documents/titles length mismatch "
             f"({len(retrieved)} vs {len(titles)}) for id={row_id!r}"
         )
 
@@ -508,7 +508,7 @@ _SAMPLE_METRIC_NAMES = [
 ]
 
 
-class RagLucioleV2SampleMetrics(SampleLevelComputation):
+class LucioleRagSampleMetrics(SampleLevelComputation):
     """Per-sample metrics with answerability-conditional gating.
 
     On answerable rows: emits citation/quality metrics; refusal_recall is None
@@ -591,11 +591,11 @@ _HIGHER_IS_BETTER = {
 }
 
 
-rag_luciole_v2_sample_metrics = SampleLevelMetricGrouping(
+luciole_rag_sample_metrics = SampleLevelMetricGrouping(
     metric_name=_SAMPLE_METRIC_NAMES,
     higher_is_better=_HIGHER_IS_BETTER,
     category=SamplingMethod.GENERATIVE,
-    sample_level_fn=RagLucioleV2SampleMetrics(),
+    sample_level_fn=LucioleRagSampleMetrics(),
     corpus_level_fn=_rag_corpus_aggregators(_SAMPLE_METRIC_NAMES),
 )
 
@@ -658,7 +658,7 @@ _DEFAULT_JUDGE_MODEL = os.getenv("LLM_MODEL", "openai/Mistral-Small-3.1-24B-Inst
 _DEFAULT_JUDGE_URL = os.getenv("LLM_API_URL")
 
 
-class RagLucioleV2FactualJudge(JudgeLLM):
+class LucioleRagFactualJudge(JudgeLLM):
     """1-5 factual-faithfulness judge, skipped on unanswerable rows."""
 
     def __init__(
@@ -731,14 +731,14 @@ class RagLucioleV2FactualJudge(JudgeLLM):
         return results
 
 
-rag_luciole_v2_factual_judge = SampleLevelMetricGrouping(
+luciole_rag_factual_judge = SampleLevelMetricGrouping(
     metric_name=["factual_judge_accuracy_ge_5", "factual_judge_accuracy_gt_4"],
     higher_is_better={
         "factual_judge_accuracy_ge_5": True,
         "factual_judge_accuracy_gt_4": True,
     },
     category=SamplingMethod.GENERATIVE,
-    sample_level_fn=RagLucioleV2FactualJudge(),
+    sample_level_fn=LucioleRagFactualJudge(),
     corpus_level_fn=_rag_corpus_aggregators(["factual_judge_accuracy_ge_5", "factual_judge_accuracy_gt_4"]),
     batched_compute=True,
 )
@@ -747,7 +747,7 @@ rag_luciole_v2_factual_judge = SampleLevelMetricGrouping(
 # ── task configs ───────────────────────────────────────────────────
 
 
-HF_REPO = os.getenv("RAG_LUCIOLE_V2_HF_REPO", "Mvanypersele/luciole_rag_benchmark")
+HF_REPO = os.getenv("LUCIOLE_RAG_HF_REPO", "Mvanypersele/luciole_rag_benchmark")
 
 DATASET_SUBSETS = [
     "hotpotqa",
@@ -779,18 +779,18 @@ DATASET_AVAIL_SPLITS = {
 }
 
 # LLM-as-judge factual scoring is opt-in (adds one API call per answerable
-# sample). Enable with RAG_LUCIOLE_V2_USE_JUDGE=1.
-_USE_JUDGE = os.getenv("RAG_LUCIOLE_V2_USE_JUDGE", "0").strip().lower() in ("1", "true", "yes", "on")
-_RAG_METRICS = [rag_luciole_v2_sample_metrics]
+# sample). Enable with LUCIOLE_RAG_USE_JUDGE=1.
+_USE_JUDGE = os.getenv("LUCIOLE_RAG_USE_JUDGE", "0").strip().lower() in ("1", "true", "yes", "on")
+_RAG_METRICS = [luciole_rag_sample_metrics]
 if _USE_JUDGE:
-    _RAG_METRICS.append(rag_luciole_v2_factual_judge)
+    _RAG_METRICS.append(luciole_rag_factual_judge)
 
 
 def _make_task(subset: str) -> LightevalTaskConfig:
     evaluation_split = DATASET_EVAL_SPLITS.get(subset, "test")
     return LightevalTaskConfig(
-        name=f"rag_luciole_v2:{subset}",
-        prompt_function=rag_luciole_v2_prompt,
+        name=f"luciole_rag:{subset}",
+        prompt_function=luciole_rag_prompt,
         suite=["community"],
         hf_repo=HF_REPO,
         hf_subset=subset,
