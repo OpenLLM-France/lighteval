@@ -247,13 +247,11 @@ CITATION_INSTRUCTION = {
         "When quoting from the context, wrap each excerpt inline with "
         f"`{_REF_TEMPLATE.replace('{title}', 'source title').replace('{excerpt}', 'excerpt')}`, "
         "where `source title` matches the `[title]` header of the cited chunk in the context. "
-        "Do **not** add a separate References section."
     ),
     "fr": (
         "Lorsque vous citez le contexte, encadrez chaque extrait en ligne avec "
         f"`{_REF_TEMPLATE.replace('{title}', 'titre de la source').replace('{excerpt}', 'extrait')}`, "
         "où `titre de la source` correspond à l'en-tête `[titre]` du document cité dans le contexte. "
-        "N'ajoutez **pas** de section Références séparée."
     ),
 }
 
