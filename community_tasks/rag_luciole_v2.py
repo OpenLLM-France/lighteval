@@ -68,6 +68,7 @@ import hashlib
 import json
 import logging
 import os
+import random
 import re
 
 import numpy as np
@@ -351,6 +352,12 @@ def build_context(titles: list[str], documents: list[str]) -> str:
 # the same ratio yield identical samples.
 DROP_RATIO = float(os.getenv("RAG_LUCIOLE_V2_DROP_RATIO", "0.5"))
 
+# Present the kept chunks in a shuffled order to remove position bias (so the
+# gold chunks aren't always at a fixed slot). The shuffle is deterministic
+# per-id, so reruns yield identical orderings. Disable with
+# RAG_LUCIOLE_V2_SHUFFLE_CHUNKS=0.
+SHUFFLE_CHUNKS = os.getenv("RAG_LUCIOLE_V2_SHUFFLE_CHUNKS", "1").strip().lower() in ("1", "true", "yes", "on")
+
 
 def _hash_unit(key: str) -> float:
     """Stable [0, 1) bucket per row id. Deterministic across runs and processes
@@ -360,12 +367,26 @@ def _hash_unit(key: str) -> float:
     return int(digest[:8], 16) / 0x100000000
 
 
+def _shuffle_deterministic(items: list, seed_key: str) -> list:
+    """Return a new list with ``items`` shuffled by a per-id seeded RNG.
+
+    Seeding ``random.Random`` with the string key is stable across runs and
+    processes (unlike Python's randomised ``hash()``).
+    """
+    shuffled = list(items)
+    random.Random(f"chunk_order:{seed_key}").shuffle(shuffled)
+    return shuffled
+
+
 def rag_luciole_v2_prompt(line, task_name: str | None = None) -> Doc:
     """Convert one prompt-agnostic row into a lighteval Doc.
 
     A deterministic md5-based bucket on the row id decides whether to drop
     the supporting chunks (``bucket < DROP_RATIO``). The decision is
     independent of task name and stable across runs at the same ratio.
+
+    When ``SHUFFLE_CHUNKS`` is set, the kept chunks are presented in a
+    per-id deterministic shuffled order to remove position bias.
     """
     query = line["query"]
     retrieved = list(line.get("retrieved_documents") or [])
@@ -387,6 +408,9 @@ def rag_luciole_v2_prompt(line, task_name: str | None = None) -> Doc:
         kept = [i for i in range(len(retrieved)) if i not in support_set]
     else:
         kept = list(range(len(retrieved)))
+
+    if SHUFFLE_CHUNKS:
+        kept = _shuffle_deterministic(kept, str(row_id))
 
     kept_titles = [str(titles[i]) for i in kept]
     kept_documents = [str(retrieved[i]) for i in kept]
