@@ -49,7 +49,7 @@ rows).
 Prompt
 ------
 Built per row with a single citation rule (each quoted excerpt is wrapped
-inline in ``<ref filename="title">...</ref>``, where ``title`` matches the
+inline in ``<ref name="title">...</ref>``, where ``title`` matches the
 ``[title]`` header of the cited chunk in the context) and a single refusal
 rule that instructs the model to reply with one **canonical refusal phrase**
 verbatim. Detection of refusal is a substring match on that phrase, so any
@@ -84,12 +84,12 @@ logger = logging.getLogger(__name__)
 
 # ── citation extraction regex ──────────────────────────────────────
 
-# The prompt instructs a single citation syntax: ``<ref filename="title">...</ref>``.
+# The prompt instructs a single citation syntax: ``<ref name="title">...</ref>``.
 # Any other syntax in the model output is treated as a failure to follow the
-# citation instruction (lower precision/recall). The ``filename`` attribute may
+# citation instruction (lower precision/recall). The ``name`` attribute may
 # use single or double quotes.
 _CITATION_TAG_RE = re.compile(
-    r'<ref\s+filename\s*=\s*["\']([^"\']+)["\']\s*>',
+    r'<ref\s+name\s*=\s*["\']([^"\']+)["\']\s*>',
     re.IGNORECASE,
 )
 
@@ -134,7 +134,7 @@ def detect_refusal(response: str) -> bool:
 
 
 def extract_cited_titles(response: str) -> list[str]:
-    """Extract titles from ``<ref filename="title">...</ref>`` tags only.
+    """Extract titles from ``<ref name="title">...</ref>`` tags only.
 
     Other citation syntaxes are intentionally not parsed: the prompt
     instructs this exact form, so unparsed citations count as
@@ -240,7 +240,7 @@ def _extract_json(text: str) -> dict:
 
 # ── prompt-building primitives ─────────────────────────────────────
 
-_REF_TEMPLATE = '<ref filename="{title}">{excerpt}</ref>'
+_REF_TEMPLATE = '<ref name="{title}">{excerpt}</ref>'
 
 CITATION_INSTRUCTION = {
     "en": (
