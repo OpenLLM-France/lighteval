@@ -273,7 +273,7 @@ def _make_task(formulation):
         few_shots_split=None,
         few_shots_select=None,
         generation_size=1,
-        metrics=[exo7_mc_metric],
+        metrics=[exo7_mc_metric_token, exo7_mc_metric_char],
         stop_sequence=["\n"],
         version=0,
     )
