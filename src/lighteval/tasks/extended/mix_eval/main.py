@@ -186,7 +186,7 @@ mixeval_freeform_easy = LightevalTaskConfig(
     evaluation_splits=["free_form"],
     few_shots_split=None,
     few_shots_select="random_sampling",
-    generation_size=100,
+    generation_size=1024,
     stop_sequence=[],  # no stop sequence, will use eot token
     version="0.1",
 )
@@ -203,7 +203,7 @@ mixeval_multichoice_easy = LightevalTaskConfig(
     evaluation_splits=["multiple_choice"],
     few_shots_split=None,
     few_shots_select="random_sampling",
-    generation_size=100,
+    generation_size=1024,
     stop_sequence=[],  # no stop sequence, will use eot token
     version="0.1",
 )
@@ -219,7 +219,7 @@ mixeval_freeform_hard = LightevalTaskConfig(
     evaluation_splits=["free_form"],
     few_shots_split=None,
     few_shots_select="random_sampling",
-    generation_size=100,
+    generation_size=1024,
     stop_sequence=[],  # no stop sequence, will use eot token
     version="0.1",
 )
@@ -236,7 +236,7 @@ mixeval_multichoice_hard = LightevalTaskConfig(
     evaluation_splits=["multiple_choice"],
     few_shots_split=None,
     few_shots_select="random_sampling",
-    generation_size=100,
+    generation_size=1024,
     stop_sequence=[],  # no stop sequence, will use eot token
     version="0.1",
 )
