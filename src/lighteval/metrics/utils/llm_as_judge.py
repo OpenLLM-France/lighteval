@@ -23,6 +23,7 @@
 
 import asyncio
 import logging
+import os
 import time
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
@@ -178,7 +179,12 @@ class JudgeLM:
 
                     self.sampling_params = SamplingParams(temperature=0.8, top_p=0.95, max_tokens=self.max_tokens)
                     self.tokenizer = get_tokenizer(self.model, tokenizer_mode="auto")
-                    self.pipe = LLM(model=self.model, max_model_len=65536, gpu_memory_utilization=0.8, dtype="float16")
+                    self.pipe = LLM(
+                        model=self.model,
+                        max_model_len=int(os.environ.get("LIGHTEVAL_JUDGE_MAX_MODEL_LEN", 65536)),
+                        gpu_memory_utilization=float(os.environ.get("LIGHTEVAL_JUDGE_GPU_MEM_UTIL", 0.8)),
+                        dtype="float16",
+                    )
                 return self.__call_vllm
 
             case "transformers":
