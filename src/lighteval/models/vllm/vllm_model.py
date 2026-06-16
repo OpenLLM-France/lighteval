@@ -25,6 +25,7 @@ import gc
 import itertools
 import logging
 import os
+import time
 from typing import Coroutine, Optional
 
 import torch
@@ -265,13 +266,70 @@ class VLLMModel(LightevalModel):
         return self._tokenizer
 
     def cleanup(self):
-        destroy_model_parallel()
+        # Explicitly shut down the vLLM engine so that its GPU memory is released before
+        # any subsequently loaded engine (e.g. the vLLM LLM-as-judge used by some metrics)
+        # tries to allocate. Relying on `del` alone is not enough: with the vLLM V1 engine
+        # the worker keeps the allocation until the engine core is shut down, and that
+        # teardown can be asynchronous -- so we also wait until the memory is reclaimed.
         if self.model is not None:
-            del self.model
+            try:
+                engine_core = getattr(getattr(self.model, "llm_engine", None), "engine_core", None)
+                if engine_core is not None and hasattr(engine_core, "shutdown"):
+                    engine_core.shutdown()
+                else:
+                    logger.warning(
+                        "Could not find a vLLM engine_core to shut down explicitly "
+                        "(V0 engine or unsupported vLLM version). GPU memory may not be "
+                        "released before the next engine loads."
+                    )
+            except Exception as e:
+                logger.warning(f"Could not explicitly shut down the vLLM engine: {e}")
+
+        destroy_model_parallel()
+        self.model = None  # drops the only strong reference to the LLM object
         gc.collect()
         ray.shutdown()
         destroy_distributed_environment()
         torch.cuda.empty_cache()
+
+        # Wait until the GPU memory is actually freed (engine teardown may be asynchronous),
+        # so the next engine to load sees a clean device instead of failing to allocate.
+        # The free-memory heuristic does not work when the GPU is shared with another process
+        # or on hardware with unified memory (e.g. DGX Spark). Set
+        # LIGHTEVAL_VLLM_SKIP_MEMORY_WAIT=1 to disable the wait in those cases.
+        if os.environ.get("LIGHTEVAL_VLLM_SKIP_MEMORY_WAIT"):
+            return
+        if not torch.cuda.is_available():
+            return
+
+        timeout_s = 60
+        threshold = 0.7
+        device_count = torch.cuda.device_count()
+        per_device = []
+        for _ in range(timeout_s):
+            per_device = [torch.cuda.mem_get_info(d) for d in range(device_count)]
+            valid = [(free, total) for free, total in per_device if total > 0]
+            if not valid:
+                return
+            # Use the *minimum* free-ratio across devices so we do not exit early when
+            # only device 0 has been reclaimed while a tensor-parallel peer is still busy.
+            if min(free / total for free, total in valid) > threshold:
+                return
+            gc.collect()
+            torch.cuda.empty_cache()
+            time.sleep(1)
+
+        usage_str = ", ".join(
+            f"GPU{d}: {free / total:.0%} free" if total > 0 else f"GPU{d}: n/a"
+            for d, (free, total) in enumerate(per_device)
+        )
+        logger.warning(
+            f"vLLM GPU memory was not fully reclaimed within {timeout_s}s after engine "
+            f"shutdown (threshold {threshold:.0%} free; current state: {usage_str}). "
+            "The next engine to load may OOM. "
+            "To skip this wait (e.g. on a GPU shared with another process, or on hardware "
+            "with unified memory like DGX Spark), set LIGHTEVAL_VLLM_SKIP_MEMORY_WAIT=1."
+        )
 
     @property
     def add_special_tokens(self):
