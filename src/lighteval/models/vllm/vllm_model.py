@@ -46,6 +46,30 @@ from lighteval.utils.imports import is_package_available, requires
 logger = logging.getLogger(__name__)
 
 
+def _model_uses_mistral_tokenizer(model_name: str, revision: str = "main") -> bool:
+    """Whether a model ships a ``tekken.json`` tokenizer file.
+
+    transformers v5 routes any model that ships a ``tekken.json`` to its
+    ``MistralCommonBackend`` tokenizer, which is incompatible with vLLM's
+    ``tokenizer_mode="auto"`` path (it has no ``is_fast`` attribute). For these
+    models vLLM must use its native ``tokenizer_mode="mistral"`` instead.
+
+    The check is local-only (no network), so it is safe under ``HF_HUB_OFFLINE``.
+    """
+    # Local directory: look for the file directly.
+    if os.path.isdir(model_name):
+        return os.path.isfile(os.path.join(model_name, "tekken.json"))
+    # Hub repo id: look in the local HF cache (resolves the revision ref offline).
+    try:
+        from huggingface_hub import try_to_load_from_cache
+
+        cached = try_to_load_from_cache(model_name, "tekken.json", revision=revision)
+        return isinstance(cached, str)
+    except Exception as e:  # pragma: no cover - detection must never be fatal
+        logger.debug("Could not determine tokenizer backend for %s: %s", model_name, e)
+        return False
+
+
 def build_vllm_token_prompts(inputs: list[list[int]]) -> list:
     """Build token prompts across vLLM prompt-schema reorganizations."""
     from vllm.inputs import TokensPrompt
@@ -216,6 +240,7 @@ class VLLMModelConfig(ModelConfig):
     max_num_seqs: PositiveInt = 128  # maximum number of sequences per iteration; This variable and `max_num_batched_tokens` effectively control the batch size at prefill stage. See https://github.com/vllm-project/vllm/issues/2492 for detailed explaination.
     max_num_batched_tokens: PositiveInt = 2048  # maximum number of tokens per batch
     subfolder: str | None = None
+    max_images: int | None = None  # cap images per prompt (use 0 to run a text-only eval on a multimodal model and skip vision profiling)
     is_async: bool = False  # Whether to use the async version or sync version of the model
     override_chat_template: bool = None
 
@@ -236,6 +261,16 @@ class VLLMModel(LightevalModel):
         self.pipeline_parallel_size = config.pipeline_parallel_size
         self.prefill_context_parallel_size = config.prefill_context_parallel_size
         self._add_special_tokens = config.add_special_tokens if config.add_special_tokens is not None else False
+        # transformers v5 routes models shipping a `tekken.json` to a tokenizer
+        # backend that vLLM's "auto" path can't consume; use vLLM's native
+        # "mistral" tokenizer_mode for those (both the engine and the tokenizer).
+        self._tokenizer_mode = (
+            "mistral"
+            if _model_uses_mistral_tokenizer(config.tokenizer or config.model_name, config.revision)
+            else "auto"
+        )
+        if self._tokenizer_mode == "mistral":
+            logger.info("Detected a Mistral (tekken) model; using tokenizer_mode='mistral'.")
         self._tokenizer = self._create_auto_tokenizer(config)
 
         self._max_length = (
@@ -355,6 +390,7 @@ class VLLMModel(LightevalModel):
             "revision": config.revision + (f"/{config.subfolder}" if config.subfolder is not None else ""),
             "dtype": config.dtype,
             "trust_remote_code": config.trust_remote_code,
+            "tokenizer_mode": self._tokenizer_mode,
             "tensor_parallel_size": config.tensor_parallel_size,
             "pipeline_parallel_size": config.pipeline_parallel_size,
             "max_model_len": self._max_length,
@@ -371,6 +407,11 @@ class VLLMModel(LightevalModel):
             self.model_args["quantization"] = config.quantization
         if config.load_format is not None:
             self.model_args["load_format"] = config.load_format
+        if config.max_images is not None:
+            # Cap (or disable, with 0) the number of images per prompt. Useful to run
+            # a text-only evaluation on a multimodal model without vLLM profiling the
+            # vision tower with dummy images (which can crash on some processors).
+            self.model_args["limit_mm_per_prompt"] = {"image": config.max_images}
 
         if config.prefill_context_parallel_size > 1 or config.decode_context_parallel_size > 1:
             from importlib.metadata import version as get_package_version
@@ -430,7 +471,7 @@ class VLLMModel(LightevalModel):
     def _create_auto_tokenizer(self, config: VLLMModelConfig):
         tokenizer = get_tokenizer(
             config.tokenizer or config.model_name,  # use HF tokenizer for non-HF models, like GGUF model.
-            tokenizer_mode="auto",
+            tokenizer_mode=self._tokenizer_mode,
             trust_remote_code=config.trust_remote_code,
             revision=config.revision,
         )
@@ -712,6 +753,7 @@ class AsyncVLLMModel(VLLMModel):
             "revision": config.revision + (f"/{config.subfolder}" if config.subfolder is not None else ""),
             "dtype": config.dtype,
             "trust_remote_code": config.trust_remote_code,
+            "tokenizer_mode": self._tokenizer_mode,
             "tensor_parallel_size": config.tensor_parallel_size,
             "data_parallel_size": config.data_parallel_size,
             "pipeline_parallel_size": config.pipeline_parallel_size,
@@ -722,6 +764,8 @@ class AsyncVLLMModel(VLLMModel):
             "max_num_batched_tokens": int(config.max_num_batched_tokens),
             "enforce_eager": True,
         }
+        if config.max_images is not None:
+            self.model_args["limit_mm_per_prompt"] = {"image": config.max_images}
 
         if config.data_parallel_size > 1:
             self._batch_size = "auto"
