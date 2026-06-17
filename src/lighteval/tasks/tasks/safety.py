@@ -294,7 +294,6 @@ LightevalTask.download_dataset_worker = _patched_download_dataset_worker
 hexphi_tasks = [
     LightevalTaskConfig(
         name=f"hexphi:{suffix}",
-        suite=["community"],
         prompt_function=regular_prompt,
         hf_repo=HEXPHI_REPO,
         hf_subset="default",
@@ -311,7 +310,6 @@ hexphi_tasks = [
 hexphi_noeval_tasks = [
     LightevalTaskConfig(
         name=f"hexphi_noeval:{suffix}",
-        suite=["community"],
         prompt_function=regular_prompt,
         hf_repo=HEXPHI_REPO,
         hf_subset="default",
@@ -373,7 +371,6 @@ def harmbench_contextual_prompt(line, task_name: str = None):
 harmbench_standard_tasks = [
     LightevalTaskConfig(
         name=f"harmbench_standard:{category}",
-        suite=["community"],
         prompt_function=regular_prompt,
         hf_repo="walledai/HarmBench",
         hf_subset="standard",
@@ -391,7 +388,6 @@ harmbench_standard_tasks = [
 harmbench_standard_noeval_tasks = [
     LightevalTaskConfig(
         name=f"harmbench_standard_noeval:{category}",
-        suite=["community"],
         prompt_function=regular_prompt,
         hf_repo="walledai/HarmBench",
         hf_subset="standard",
@@ -409,7 +405,6 @@ harmbench_standard_noeval_tasks = [
 harmbench_contextual_tasks = [
     LightevalTaskConfig(
         name=f"harmbench_contextual:{category}",
-        suite=["community"],
         prompt_function=harmbench_contextual_prompt,
         hf_repo="walledai/HarmBench",
         hf_subset="contextual",
@@ -427,7 +422,6 @@ harmbench_contextual_tasks = [
 harmbench_contextual_noeval_tasks = [
     LightevalTaskConfig(
         name=f"harmbench_contextual_noeval:{category}",
-        suite=["community"],
         prompt_function=harmbench_contextual_prompt,
         hf_repo="walledai/HarmBench",
         hf_subset="contextual",
