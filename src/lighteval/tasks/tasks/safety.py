@@ -31,6 +31,7 @@ Benchmarks:
     - hexphi:{category} (LLM-Tuning-Safety/HEx-PHI, 10 categories, averaged across category when no subset is specified)
     - harmbench_standard:{category}  (walledai/HarmBench, `standard` subset, 6 categories)
     - harmbench_contextual:{category} (walledai/HarmBench, `contextual` subset, 6 categories)
+    - aya_red_teaming_{lang} (walledai/AyaRedTeaming, 8 languages, ISO 639-3 codes: ara/eng/fil/fra/hin/rus/srp/spa)
 
 Metric: safety_rate — fraction of responses judged safe (higher is better).
 
@@ -41,6 +42,7 @@ Usage:
     lighteval vllm "model_name=..." "community|harmbench_standard|0"
     lighteval vllm "model_name=..." "community|harmbench_standard:cybercrime_intrusion|0"
     lighteval vllm "model_name=..." "community|harmbench_contextual|0"
+    lighteval vllm "model_name=..." "community|aya_red_teaming_fra|0"
 """
 
 import logging
@@ -484,6 +486,59 @@ harmbench_contextual_noeval_tasks = [
 ]
 
 
+# ---------------------------------------------------------------------------
+# Aya Red-Teaming (https://huggingface.co/datasets/walledai/AyaRedTeaming)
+# ---------------------------------------------------------------------------
+# Multilingual human-curated red-teaming prompts (Cohere's Aya project, Aakanksha
+# et al. 2024). The HF dataset ships one split per language; we expose each
+# language as its own task, suffixed by the ISO 639-3 language code.
+
+# ISO 639-3 code -> HF split name
+AYA_RED_TEAMING_LANGUAGES = {
+    "ara": "arabic",
+    "eng": "english",
+    "fil": "filipino",
+    "fra": "french",
+    "hin": "hindi",
+    "rus": "russian",
+    "srp": "serbian",
+    "spa": "spanish",
+}
+
+
+aya_red_teaming_tasks = [
+    LightevalTaskConfig(
+        name=f"aya_red_teaming_{code}",
+        prompt_function=regular_prompt,
+        hf_repo="walledai/AyaRedTeaming",
+        hf_subset="default",
+        metrics=[llm_judge_safety],
+        hf_avail_splits=[split],
+        evaluation_splits=[split],
+        generation_size=1024,
+        stop_sequence=[],
+        version="0.1",
+    )
+    for code, split in AYA_RED_TEAMING_LANGUAGES.items()
+]
+
+aya_red_teaming_noeval_tasks = [
+    LightevalTaskConfig(
+        name=f"aya_red_teaming_noeval_{code}",
+        prompt_function=regular_prompt,
+        hf_repo="walledai/AyaRedTeaming",
+        hf_subset="default",
+        metrics=[dummy_metric],
+        hf_avail_splits=[split],
+        evaluation_splits=[split],
+        generation_size=1024,
+        stop_sequence=[],
+        version="0.1",
+    )
+    for code, split in AYA_RED_TEAMING_LANGUAGES.items()
+]
+
+
 TASKS_TABLE = [
     advbench_task,
     advbench_noeval_task,
@@ -493,4 +548,6 @@ TASKS_TABLE = [
     *harmbench_standard_noeval_tasks,
     *harmbench_contextual_tasks,
     *harmbench_contextual_noeval_tasks,
+    *aya_red_teaming_tasks,
+    *aya_red_teaming_noeval_tasks,
 ]
