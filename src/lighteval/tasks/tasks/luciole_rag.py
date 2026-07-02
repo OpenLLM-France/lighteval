@@ -52,9 +52,12 @@ Built per row with a single citation rule (each quoted excerpt is wrapped
 inline in ``<ref name="title">...</ref>``, where ``title`` matches the
 ``[title]`` header of the cited chunk in the context) and a single refusal
 rule that instructs the model to reply with one **canonical refusal phrase**
-verbatim. Detection of refusal is a substring match on that phrase, so any
-other phrasing counts as a failure to follow the refusal instruction. The
-prompt language (FR/EN) is detected per row from the query.
+verbatim. Detection of refusal is lenient: it matches the shorter invariant
+core of the canonical phrase (e.g. ``do not allow me to answer`` / ``ne
+permettent pas de répondre``), so common paraphrases of the prefix ("The
+provided context...", "The available/retrieved documents...") still count
+as refusals. The prompt language (FR/EN) is detected per row from the
+query.
 
 Judge
 -----
@@ -98,13 +101,41 @@ _CITATION_TAG_RE = re.compile(
 # ── refusal: canonical phrases ─────────────────────────────────────
 
 # The system prompt instructs the model to reply **exactly** with the
-# language-matched phrase below when the context is insufficient. Detection
-# of refusal is a substring match on this phrase (whitespace-tolerant,
-# case-insensitive). Any other refusal phrasing the model invents is
-# treated as an instruction-following failure, not as a refusal.
+# language-matched phrase below when the context is insufficient. In
+# practice the model frequently paraphrases the prefix ("The provided
+# context...", "The available documents...", "The retrieved documents...",
+# etc.) while keeping the invariant tail stable, so detection (see
+# ``detect_refusal``) matches only that shorter invariant core rather than
+# the full canonical phrase.
 REFUSAL_PHRASE = {
     "en": "The provided documents do not allow me to answer this question.",
     "fr": "Les documents fournis ne permettent pas de répondre à cette question.",
+}
+
+# Lenient refusal-detection substrings, per language. Each is matched against
+# the case-insensitive, whitespace-collapsed response. Covers the variants
+# observed in model outputs: with/without the "me"/object pronoun, the
+# "do not"/"don't" contraction in EN, and singular/plural verb agreement in
+# FR (which follows whether the model rephrased the subject as singular —
+# "the context" / "le contexte" — or plural — "the documents" / "les
+# documents").
+_REFUSAL_DETECTION_PHRASES = {
+    "en": (
+        "does not allow me to answer",
+        "does not allow to answer",
+        "do not allow me to answer",
+        "do not allow to answer",
+        "doesn't allow me to answer",
+        "doesn't allow to answer",
+        "don't allow me to answer",
+        "don't allow to answer",
+    ),
+    "fr": (
+        "ne permettent pas de répondre",
+        "ne permet pas de répondre",
+        "ne me permettent pas de répondre",
+        "ne me permet pas de répondre",
+    ),
 }
 
 
@@ -122,13 +153,16 @@ def _normalize_spaces(text: str) -> str:
     return " ".join(text.lower().split())
 
 
-_NORMALIZED_REFUSAL_PHRASES = tuple(_normalize_spaces(p) for p in REFUSAL_PHRASE.values())
+_NORMALIZED_REFUSAL_PHRASES = tuple(
+    _normalize_spaces(p) for phrases in _REFUSAL_DETECTION_PHRASES.values() for p in phrases
+)
 
 
 def detect_refusal(response: str) -> bool:
-    """True iff the response contains the canonical refusal phrase in either
-    supported language. Match is case-insensitive and whitespace-tolerant
-    (line breaks and runs of spaces collapse to a single space).
+    """True iff the response contains any of the lenient refusal-detection
+    phrases (see ``_REFUSAL_DETECTION_PHRASES``) in either supported language.
+    Match is case-insensitive and whitespace-tolerant (line breaks and runs
+    of spaces collapse to a single space).
     """
     norm = _normalize_spaces(response)
     return any(p in norm for p in _NORMALIZED_REFUSAL_PHRASES)
