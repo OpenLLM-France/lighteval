@@ -23,6 +23,7 @@
 
 import asyncio
 import logging
+import os
 import time
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
@@ -97,7 +98,7 @@ class JudgeLM:
         judge_backend: Literal["litellm", "openai", "transformers", "tgi", "vllm", "inference-providers"],
         url: str | None = None,
         api_key: str | None = None,
-        max_tokens: int | None = None,
+        max_tokens: int = 512,
         response_format: BaseModel = None,
         hf_provider: Optional[
             Literal[
@@ -168,11 +169,22 @@ class JudgeLM:
                 raise_if_package_not_available("vllm")
                 if self.pipe is None:
                     from vllm import LLM, SamplingParams
-                    from vllm.tokenizers import get_tokenizer
+
+                    try:
+                        # vLLM moved `get_tokenizer` to `vllm.tokenizers` in v0.12.0.
+                        # Keep the fallback while our lower bound remains on v0.11.x.
+                        from vllm.tokenizers import get_tokenizer
+                    except ModuleNotFoundError:
+                        from vllm.transformers_utils.tokenizer import get_tokenizer
 
                     self.sampling_params = SamplingParams(temperature=0.8, top_p=0.95, max_tokens=self.max_tokens)
                     self.tokenizer = get_tokenizer(self.model, tokenizer_mode="auto")
-                    self.pipe = LLM(model=self.model, gpu_memory_utilization=0.8, dtype="float16")
+                    self.pipe = LLM(
+                        model=self.model,
+                        max_model_len=int(os.environ.get("LIGHTEVAL_JUDGE_MAX_MODEL_LEN", 65536)),
+                        gpu_memory_utilization=float(os.environ.get("LIGHTEVAL_JUDGE_GPU_MEM_UTIL", 0.8)),
+                        dtype="float16",
+                    )
                 return self.__call_vllm
 
             case "transformers":
@@ -295,10 +307,18 @@ class JudgeLM:
         return response
 
     def __call_vllm(self, prompt):
-        tokenized = [self.tokenizer.apply_chat_template(p) for p in prompt]
-        # Convert token IDs to TokensPrompt format for vLLM v0.15+
-        prompts = [{"prompt_token_ids": token_ids} for token_ids in tokenized]
-        output = self.pipe.generate(prompts=prompts, sampling_params=self.sampling_params, use_tqdm=True)
+        from vllm import TokensPrompt
+
+        # `return_dict=False` returns a flat list[int] of token ids. transformers v5
+        # changed the default to True (returns a BatchEncoding), which would be passed
+        # whole as prompt_token_ids and break vLLM. tokenize=True for the same reason.
+        tokenized = [self.tokenizer.apply_chat_template(p, tokenize=True, return_dict=False) for p in prompt]
+        output = self.pipe.generate(
+            # prompt_token_ids=tokenized, # vllm 0.10.1
+            [TokensPrompt(prompt_token_ids=input) for input in tokenized],
+            sampling_params=self.sampling_params,
+            use_tqdm=True,
+        )
         outputs = [output.outputs[0].text for output in output]
         return outputs
 
@@ -328,14 +348,9 @@ class JudgeLM:
                         "messages": prompt,
                         "n": 1,
                         "caching": True,
-                        "response_format": self.response_format,
                     }
                     if max_new_tokens is not None:
-                        kwargs["max_tokens"] = (max_new_tokens,)
-                    if self.api_key is not None:
-                        kwargs["api_key"] = self.api_key
-                    if self.url is not None:
-                        kwargs["base_url"] = self.url
+                        kwargs["max_tokens"] = max_new_tokens
 
                     response = litellm.completion(**kwargs)
                     text = response.choices[0].message.content

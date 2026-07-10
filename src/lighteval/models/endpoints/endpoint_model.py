@@ -263,7 +263,10 @@ class InferenceEndpointModel(LightevalModel):
         self._add_special_tokens = config.add_special_tokens if config.add_special_tokens is not None else False
 
         self.prompt_manager = PromptManager(
-            use_chat_template=True, tokenizer=self.tokenizer, system_prompt=config.system_prompt
+            use_chat_template=True,
+            tokenizer=self.tokenizer,
+            system_prompt=config.system_prompt,
+            enable_thinking=config.enable_thinking,
         )
         self.generation_parameters = config.generation_parameters
         self.generation_config = self.generation_parameters.to_tgi_ie_dict()

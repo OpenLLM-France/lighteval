@@ -138,7 +138,6 @@ class Registry:
                     TASKS_TABLE = [
                         LightevalTaskConfig(
                             name="custom_task",
-                            suite="custom",
                             ...
                         )
                     ]

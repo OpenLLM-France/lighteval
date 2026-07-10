@@ -231,7 +231,10 @@ class TransformersModel(LightevalModel):
             model_size = -1
 
         self.prompt_manager = PromptManager(
-            use_chat_template=self.use_chat_template, tokenizer=self.tokenizer, system_prompt=config.system_prompt
+            use_chat_template=self.use_chat_template,
+            tokenizer=self.tokenizer,
+            system_prompt=config.system_prompt,
+            enable_thinking=config.enable_thinking,
         )
 
         # Initialize cache for tokenization and predictions
@@ -296,6 +299,7 @@ class TransformersModel(LightevalModel):
             use_chat_template=self.use_chat_template,
             tokenizer=self.tokenizer,
             system_prompt=config.system_prompt if config else None,
+            enable_thinking=config.enable_thinking if config else None,
         )
 
         # Initialize cache for tokenization and predictions
@@ -689,7 +693,7 @@ class TransformersModel(LightevalModel):
                     # NOTE: we are assuming all items in a batch behave similarly (same
                     # stop_tokens and max_tokens genrated) which is not necessarily
                     # the case! Because of that we only use batch size of 1
-                    stop_tokens = [self.tokenizer.eos_token] + batch[0].stop_sequences
+                    stop_tokens = [self.tokenizer.eos_token] + list(batch[0].stop_sequences)
 
                 max_new_tokens = batch[0].generation_size
                 num_samples = batch[0].num_samples
@@ -1108,7 +1112,7 @@ class TransformersModel(LightevalModel):
                         # 2d on num choices and max len
                         len_choice = gathered_len_choices[i]
                         batch_tokenized_continuations_processed.append(
-                            gathered_continuations[i][:num_choices][:len_choice]
+                            gathered_continuations[i][:num_choices, :len_choice]
                         )
                         # 1d on max len context
                         len_context = gathered_len_context[i]
@@ -1120,6 +1124,10 @@ class TransformersModel(LightevalModel):
                     logits_sum_doc = batch_logits_sums[i]
                     tokenized_contexts_batch = batch_tokenized_contexts_processed[i]
                     tokenized_continuations_batch = batch_tokenized_continuations_processed[i]
+                    # Remove padding (-1) from continuations
+                    tokenized_continuations_batch = [
+                        [t for t in tokens if t != -1] for tokens in tokenized_continuations_batch.tolist()
+                    ]
                     answer = ModelResponse(
                         argmax_logits_eq_gold=[max_equal.cpu().item() for max_equal in max_equals_doc],
                         logprobs=[sum.cpu().item() for sum in logits_sum_doc],

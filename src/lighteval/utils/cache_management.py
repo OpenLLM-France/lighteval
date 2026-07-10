@@ -25,6 +25,7 @@ import hashlib
 import json
 import logging
 import os
+import re
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Callable, List, Set, Tuple, Union
@@ -178,6 +179,8 @@ class SampleCache:
             # Use deterministic ordering based on string repr
             config_strs = sorted([cfg.__str__(lite=True) for cfg in task_configs])
             config_str = "|".join(config_strs)
+            # Strip function memory addresses so the hash stays deterministic across runs.
+            config_str = re.sub(r"<function (\w+) at 0x[0-9a-fA-F]+>", r"<function \1>", config_str)
             task_hash = hashlib.sha256(config_str.encode()).hexdigest()[:16]
             self._task_hashes[full_task_name] = task_hash
         return self._task_hashes[full_task_name]

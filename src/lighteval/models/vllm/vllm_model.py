@@ -25,10 +25,12 @@ import gc
 import itertools
 import logging
 import os
+import time
 from typing import Coroutine, Optional
 
 import torch
-from pydantic import NonNegativeFloat, NonNegativeInt, PositiveInt
+from packaging.version import Version
+from pydantic import NonNegativeFloat, NonNegativeInt, PositiveInt, model_validator
 from tqdm import tqdm
 
 from lighteval.data import GenerativeTaskDataset, LoglikelihoodDataset
@@ -42,6 +44,30 @@ from lighteval.utils.imports import is_package_available, requires
 
 
 logger = logging.getLogger(__name__)
+
+
+def _model_uses_mistral_tokenizer(model_name: str, revision: str = "main") -> bool:
+    """Whether a model ships a ``tekken.json`` tokenizer file.
+
+    transformers v5 routes any model that ships a ``tekken.json`` to its
+    ``MistralCommonBackend`` tokenizer, which is incompatible with vLLM's
+    ``tokenizer_mode="auto"`` path (it has no ``is_fast`` attribute). For these
+    models vLLM must use its native ``tokenizer_mode="mistral"`` instead.
+
+    The check is local-only (no network), so it is safe under ``HF_HUB_OFFLINE``.
+    """
+    # Local directory: look for the file directly.
+    if os.path.isdir(model_name):
+        return os.path.isfile(os.path.join(model_name, "tekken.json"))
+    # Hub repo id: look in the local HF cache (resolves the revision ref offline).
+    try:
+        from huggingface_hub import try_to_load_from_cache
+
+        cached = try_to_load_from_cache(model_name, "tekken.json", revision=revision)
+        return isinstance(cached, str)
+    except Exception as e:  # pragma: no cover - detection must never be fatal
+        logger.debug("Could not determine tokenizer backend for %s: %s", model_name, e)
+        return False
 
 
 def build_vllm_token_prompts(inputs: list[list[int]]) -> list:
@@ -110,6 +136,16 @@ class VLLMModelConfig(ModelConfig):
             Number of GPUs to use for data parallelism. Defaults to 1.
         pipeline_parallel_size (PositiveInt):
             Number of GPUs to use for pipeline parallelism. Defaults to 1.
+        prefill_context_parallel_size (PositiveInt):
+            Number of GPUs to use for prefill context parallelism. Splits long sequences across GPUs
+            during the prefill phase, reducing peak KV-cache memory. Requires vllm >= 0.15.0 and an
+            attention backend that sets supports_pcp=True (not available in vllm 0.15.1).
+            Increases total GPU count by this factor. Defaults to 1 (disabled).
+        decode_context_parallel_size (PositiveInt):
+            Number of context parallel groups for the decode phase. Shards the KV cache along
+            the token dimension, reusing the existing TP GPUs (does not require extra GPUs).
+            tensor_parallel_size must be divisible by this value. Requires vllm >= 0.15.0.
+            Defaults to 1 (disabled).
         gpu_memory_utilization (NonNegativeFloat):
             Fraction of GPU memory to use. Lower this if running out of memory. Defaults to 0.9.
         enable_prefix_caching (bool):
@@ -173,6 +209,19 @@ class VLLMModelConfig(ModelConfig):
     tensor_parallel_size: PositiveInt = 1  # how many GPUs to use for tensor parallelism
     data_parallel_size: PositiveInt = 1  # how many GPUs to use for data parallelism
     pipeline_parallel_size: PositiveInt = 1  # how many GPUs to use for pipeline parallelism
+    prefill_context_parallel_size: PositiveInt = 1  # context parallelism for prefill phase (requires vllm >= 0.15.0)
+    decode_context_parallel_size: PositiveInt = 1  # context parallelism for decode phase (requires vllm >= 0.15.0)
+
+    @model_validator(mode="after")
+    def validate_context_parallelism(self) -> "VLLMModelConfig":
+        if self.decode_context_parallel_size > 1:
+            if self.tensor_parallel_size % self.decode_context_parallel_size != 0:
+                raise ValueError(
+                    f"tensor_parallel_size ({self.tensor_parallel_size}) must be divisible by "
+                    f"decode_context_parallel_size ({self.decode_context_parallel_size})."
+                )
+        return self
+
     gpu_memory_utilization: NonNegativeFloat = 0.9  # lower this if you are running out of memory
     enable_prefix_caching: bool = None  # whether to enable prefix caching to speed up generation. May use more memory. Should be disabled for LFM2
     max_model_length: PositiveInt | None = (
@@ -191,6 +240,7 @@ class VLLMModelConfig(ModelConfig):
     max_num_seqs: PositiveInt = 128  # maximum number of sequences per iteration; This variable and `max_num_batched_tokens` effectively control the batch size at prefill stage. See https://github.com/vllm-project/vllm/issues/2492 for detailed explaination.
     max_num_batched_tokens: PositiveInt = 2048  # maximum number of tokens per batch
     subfolder: str | None = None
+    max_images: int | None = None  # cap images per prompt (use 0 to run a text-only eval on a multimodal model and skip vision profiling)
     is_async: bool = False  # Whether to use the async version or sync version of the model
     override_chat_template: bool = None
 
@@ -208,7 +258,19 @@ class VLLMModel(LightevalModel):
         )
         self.data_parallel_size = config.data_parallel_size
         self.tensor_parallel_size = config.tensor_parallel_size
+        self.pipeline_parallel_size = config.pipeline_parallel_size
+        self.prefill_context_parallel_size = config.prefill_context_parallel_size
         self._add_special_tokens = config.add_special_tokens if config.add_special_tokens is not None else False
+        # transformers v5 routes models shipping a `tekken.json` to a tokenizer
+        # backend that vLLM's "auto" path can't consume; use vLLM's native
+        # "mistral" tokenizer_mode for those (both the engine and the tokenizer).
+        self._tokenizer_mode = (
+            "mistral"
+            if _model_uses_mistral_tokenizer(config.tokenizer or config.model_name, config.revision)
+            else "auto"
+        )
+        if self._tokenizer_mode == "mistral":
+            logger.info("Detected a Mistral (tekken) model; using tokenizer_mode='mistral'.")
         self._tokenizer = self._create_auto_tokenizer(config)
 
         self._max_length = (
@@ -227,7 +289,9 @@ class VLLMModel(LightevalModel):
 
         self.pairwise_tokenization = config.pairwise_tokenization
 
-        self.prompt_manager = PromptManager(self.use_chat_template, self.tokenizer, config.system_prompt)
+        self.prompt_manager = PromptManager(
+            self.use_chat_template, self.tokenizer, config.system_prompt, enable_thinking=config.enable_thinking
+        )
 
         # Initialize cache for tokenization and predictions
         self._cache = SampleCache(config)
@@ -237,13 +301,70 @@ class VLLMModel(LightevalModel):
         return self._tokenizer
 
     def cleanup(self):
-        destroy_model_parallel()
+        # Explicitly shut down the vLLM engine so that its GPU memory is released before
+        # any subsequently loaded engine (e.g. the vLLM LLM-as-judge used by some metrics)
+        # tries to allocate. Relying on `del` alone is not enough: with the vLLM V1 engine
+        # the worker keeps the allocation until the engine core is shut down, and that
+        # teardown can be asynchronous -- so we also wait until the memory is reclaimed.
         if self.model is not None:
-            del self.model
+            try:
+                engine_core = getattr(getattr(self.model, "llm_engine", None), "engine_core", None)
+                if engine_core is not None and hasattr(engine_core, "shutdown"):
+                    engine_core.shutdown()
+                else:
+                    logger.warning(
+                        "Could not find a vLLM engine_core to shut down explicitly "
+                        "(V0 engine or unsupported vLLM version). GPU memory may not be "
+                        "released before the next engine loads."
+                    )
+            except Exception as e:
+                logger.warning(f"Could not explicitly shut down the vLLM engine: {e}")
+
+        destroy_model_parallel()
+        self.model = None  # drops the only strong reference to the LLM object
         gc.collect()
         ray.shutdown()
         destroy_distributed_environment()
         torch.cuda.empty_cache()
+
+        # Wait until the GPU memory is actually freed (engine teardown may be asynchronous),
+        # so the next engine to load sees a clean device instead of failing to allocate.
+        # The free-memory heuristic does not work when the GPU is shared with another process
+        # or on hardware with unified memory (e.g. DGX Spark). Set
+        # LIGHTEVAL_VLLM_SKIP_MEMORY_WAIT=1 to disable the wait in those cases.
+        if os.environ.get("LIGHTEVAL_VLLM_SKIP_MEMORY_WAIT"):
+            return
+        if not torch.cuda.is_available():
+            return
+
+        timeout_s = 60
+        threshold = 0.7
+        device_count = torch.cuda.device_count()
+        per_device = []
+        for _ in range(timeout_s):
+            per_device = [torch.cuda.mem_get_info(d) for d in range(device_count)]
+            valid = [(free, total) for free, total in per_device if total > 0]
+            if not valid:
+                return
+            # Use the *minimum* free-ratio across devices so we do not exit early when
+            # only device 0 has been reclaimed while a tensor-parallel peer is still busy.
+            if min(free / total for free, total in valid) > threshold:
+                return
+            gc.collect()
+            torch.cuda.empty_cache()
+            time.sleep(1)
+
+        usage_str = ", ".join(
+            f"GPU{d}: {free / total:.0%} free" if total > 0 else f"GPU{d}: n/a"
+            for d, (free, total) in enumerate(per_device)
+        )
+        logger.warning(
+            f"vLLM GPU memory was not fully reclaimed within {timeout_s}s after engine "
+            f"shutdown (threshold {threshold:.0%} free; current state: {usage_str}). "
+            "The next engine to load may OOM. "
+            "To skip this wait (e.g. on a GPU shared with another process, or on hardware "
+            "with unified memory like DGX Spark), set LIGHTEVAL_VLLM_SKIP_MEMORY_WAIT=1."
+        )
 
     @property
     def add_special_tokens(self):
@@ -253,7 +374,7 @@ class VLLMModel(LightevalModel):
     def max_length(self) -> int:
         return self._max_length
 
-    def _create_auto_model(self, config: VLLMModelConfig) -> Optional[LLM]:
+    def _create_auto_model(self, config: VLLMModelConfig) -> Optional[LLM]:  # noqa: C901
         """Creates an instance of the pretrained HF model.
 
         Args:
@@ -269,6 +390,7 @@ class VLLMModel(LightevalModel):
             "revision": config.revision + (f"/{config.subfolder}" if config.subfolder is not None else ""),
             "dtype": config.dtype,
             "trust_remote_code": config.trust_remote_code,
+            "tokenizer_mode": self._tokenizer_mode,
             "tensor_parallel_size": config.tensor_parallel_size,
             "pipeline_parallel_size": config.pipeline_parallel_size,
             "max_model_len": self._max_length,
@@ -278,14 +400,49 @@ class VLLMModel(LightevalModel):
             "max_num_batched_tokens": int(config.max_num_batched_tokens),
             "enforce_eager": True,
         }
+        if self._max_length:
+            self.model_args["hf_overrides"] = {"max_position_embeddings": self._max_length}
 
         if config.quantization is not None:
             self.model_args["quantization"] = config.quantization
         if config.load_format is not None:
             self.model_args["load_format"] = config.load_format
+        if config.max_images is not None:
+            # Cap (or disable, with 0) the number of images per prompt. Useful to run
+            # a text-only evaluation on a multimodal model without vLLM profiling the
+            # vision tower with dummy images (which can crash on some processors).
+            self.model_args["limit_mm_per_prompt"] = {"image": config.max_images}
+
+        if config.prefill_context_parallel_size > 1 or config.decode_context_parallel_size > 1:
+            from importlib.metadata import version as get_package_version
+
+            _VLLM_MIN_VERSION_CP = Version("0.15.0")
+            _vllm_version = Version(get_package_version("vllm"))
+            if _vllm_version < _VLLM_MIN_VERSION_CP:
+                raise ValueError(
+                    f"Context parallelism (prefill_context_parallel_size / decode_context_parallel_size) "
+                    f"requires vllm >= {_VLLM_MIN_VERSION_CP}, but the installed version is {_vllm_version}."
+                )
+            if config.prefill_context_parallel_size > 1:
+                # PCP requires attention backends to set supports_pcp=True. Check this early
+                # to avoid failing after several minutes of model loading.
+                try:
+                    from vllm.v1.attention.backend import AttentionImplBase
+
+                    if not AttentionImplBase.supports_pcp:
+                        raise NotImplementedError(
+                            f"prefill_context_parallel_size > 1 is not supported by any attention "
+                            f"backend in the installed vllm {_vllm_version}. "
+                            f"Consider using tensor_parallel_size or decode_context_parallel_size instead."
+                        )
+                except ImportError:
+                    pass  # older vllm layout; let vllm raise its own error
+                self.model_args["prefill_context_parallel_size"] = config.prefill_context_parallel_size
+            if config.decode_context_parallel_size > 1:
+                self.model_args["decode_context_parallel_size"] = config.decode_context_parallel_size
 
         if config.data_parallel_size > 1:
-            self.model_args["distributed_executor_backend"] = "ray"
+            self.model_args["distributed_executor_backend"] = "mp"
             self._batch_size = "auto"
 
             if self._max_length is None:
@@ -304,19 +461,22 @@ class VLLMModel(LightevalModel):
         # Inferring from the tokenizer will cause vllm to bug for models with mismatches between model
         # config and tk config, like mistralai/Mistral-7B-v0.1
         if self._max_length is None:
-            self._max_length = model.llm_engine.model_config.max_model_len
+            try:
+                self._max_length = model.llm_engine.model_config.max_seq_len_to_capture
+            except AttributeError:
+                self._max_length = model.llm_engine.model_config.max_model_len
 
         return model
 
     def _create_auto_tokenizer(self, config: VLLMModelConfig):
         tokenizer = get_tokenizer(
             config.tokenizer or config.model_name,  # use HF tokenizer for non-HF models, like GGUF model.
-            tokenizer_mode="auto",
+            tokenizer_mode=self._tokenizer_mode,
             trust_remote_code=config.trust_remote_code,
             revision=config.revision,
         )
-
-        tokenizer.pad_token = tokenizer.eos_token
+        if hasattr(tokenizer, "eos_token"):
+            tokenizer.pad_token = tokenizer.eos_token
         return tokenizer
 
     @cached(SamplingMethod.GENERATIVE)
@@ -450,7 +610,9 @@ class VLLMModel(LightevalModel):
 
         if self.data_parallel_size > 1:
 
-            @ray.remote(num_gpus=self.tensor_parallel_size)
+            @ray.remote(
+                num_gpus=self.tensor_parallel_size * self.pipeline_parallel_size * self.prefill_context_parallel_size
+            )
             def run_inference_one_model(model_args: dict, sampling_params: SamplingParams, requests):
                 llm = LLM(**model_args)
                 prompts = build_vllm_token_prompts(requests)
@@ -507,6 +669,9 @@ class VLLMModel(LightevalModel):
                     tokenized_continuations_batch.append(tokenized_continuation)
                     tokenized_contexts_batch.append(tokenized_context)
 
+            # Left truncate the inputs to the maximum length
+            if self.max_length:  # can be None if the model is initialized with ray
+                inputs = [input[-self.max_length :] for input in inputs]
             outputs = self._generate(inputs, generate=False)
 
             flat_index = 0
@@ -529,7 +694,12 @@ class VLLMModel(LightevalModel):
 
                     continuation_logprobs = []
                     for token, logprobs_at_position in zip(continuation, continuation_prompt_logprobs):
-                        continuation_logprobs.append(logprobs_at_position[token])
+                        # vllm>=0.12 can return None entries for tokens served from the prefix cache.
+                        if logprobs_at_position is None:
+                            continue
+                        logprob = logprobs_at_position[token]
+                        assert logprob.logprob <= 0.0, f"Logprob must be <= 0, got {logprob.logprob}"
+                        continuation_logprobs.append(logprob)
 
                     bool_score = all(logprob.rank == 1 for logprob in continuation_logprobs)
                     continuation_logprobs = [logprob.logprob for logprob in continuation_logprobs]
@@ -583,6 +753,7 @@ class AsyncVLLMModel(VLLMModel):
             "revision": config.revision + (f"/{config.subfolder}" if config.subfolder is not None else ""),
             "dtype": config.dtype,
             "trust_remote_code": config.trust_remote_code,
+            "tokenizer_mode": self._tokenizer_mode,
             "tensor_parallel_size": config.tensor_parallel_size,
             "data_parallel_size": config.data_parallel_size,
             "pipeline_parallel_size": config.pipeline_parallel_size,
@@ -593,6 +764,8 @@ class AsyncVLLMModel(VLLMModel):
             "max_num_batched_tokens": int(config.max_num_batched_tokens),
             "enforce_eager": True,
         }
+        if config.max_images is not None:
+            self.model_args["limit_mm_per_prompt"] = {"image": config.max_images}
 
         if config.data_parallel_size > 1:
             self._batch_size = "auto"
@@ -601,7 +774,10 @@ class AsyncVLLMModel(VLLMModel):
 
         # If the max_length can't get extracted from the config, it will be inferred from the model
         if self._max_length is None:
-            self._max_length = model.model_config.max_model_len
+            try:
+                self._max_length = model.model_config.max_seq_len_to_capture
+            except AttributeError:
+                self._max_length = model.model_config.max_model_len
 
         return model
 
