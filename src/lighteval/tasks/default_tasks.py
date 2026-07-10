@@ -14550,7 +14550,7 @@ mmlu_pro = LightevalTaskConfig(
     generation_size=4096,
     metrics=[Metrics.gpqa_instruct_metric],
     stop_sequence=None,
-    version=0,
+    version=1,
 )
 mnist_ascii_bigbench = LightevalTaskConfig(
     name="mnist_ascii",
