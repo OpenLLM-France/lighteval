@@ -25,7 +25,7 @@ name:
 MathAlea
 
 dataset:
-OpenLLM-BPI/MathAleaMCQ
+cea-list-ia/MathAleaMCQ
 
 abstract:
 MathAlea is a dataset of multiple-choice math questions for French middle and high school students.
@@ -181,7 +181,7 @@ def _make_generative_task(subset, alias, prompt_key):
     return LightevalTaskConfig(
         name=f"mathalea_generative_{prompt_key}:{alias}",
         prompt_function=_make_generative_prompt_fn(system_prompt),
-        hf_repo="OpenLLM-BPI/MathAleaMCQ",
+        hf_repo="cea-list-ia/MathAleaMCQ",
         hf_subset=subset,
         hf_avail_splits=["dev", "test"],
         evaluation_splits=["test"],
@@ -209,7 +209,7 @@ def _make_tasks(subset, alias, formulation, prompt_key):
             },
             formulation=formulation,
         ),
-        hf_repo="OpenLLM-BPI/MathAleaMCQ",
+        hf_repo="cea-list-ia/MathAleaMCQ",
         hf_subset=subset,
         hf_avail_splits=["dev", "test"],
         evaluation_splits=["test"],
