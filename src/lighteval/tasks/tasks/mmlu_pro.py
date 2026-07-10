@@ -98,11 +98,28 @@ def mmlu_pro_raw_prompt(line, task_name: str = None):
 
     query = instruction + f"{line['question']}\n\n{choices_str}\n\nAnswer:"
 
+    # Use the dataset's worked chain-of-thought as the gold when it is
+    # available (validation split → few-shot pool). Without this, the shown
+    # demonstrations end in a bare letter and teach the model to answer
+    # directly, which MMLU-Pro was designed to penalise (see §5 of
+    # arXiv:2406.01574 and lm-eval-harness's mmlu_pro). Test rows carry an
+    # empty cot_content, so we fall back to the letter and the metric's
+    # extractor works as before.
+    cot = (line.get("cot_content") or "").strip()
+    if cot.startswith("A:"):
+        cot = cot[2:].lstrip()
+    if cot:
+        choices = [cot]
+        gold_index = 0
+    else:
+        choices = list(letters)
+        gold_index = line["answer_index"]
+
     return Doc(
         task_name=task_name,
         query=query,
-        choices=list(letters),
-        gold_index=line["answer_index"],
+        choices=choices,
+        gold_index=gold_index,
         instruction=instruction,
     )
 
@@ -119,7 +136,7 @@ mmlu_pro_raw = LightevalTaskConfig(
     generation_size=4096,
     metrics=[Metrics.gpqa_instruct_metric],
     stop_sequence=None,
-    version=0,
+    version=1,
 )
 
 
