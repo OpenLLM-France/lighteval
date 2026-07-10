@@ -25,7 +25,7 @@ name:
 Exo7
 
 dataset:
-OpenLLM-BPI/Exo7MCQ
+cea-list-ia/Exo7MCQ
 
 abstract:
 Exo7 is a dataset of multi-label multiple-choice math questions for French undergraduate
@@ -266,7 +266,7 @@ def _make_task(formulation):
         name=f"exo7_{formulation.name.lower()}",
         prompt_function=_make_prompt_fn(formulation),
         suite=["community"],
-        hf_repo="OpenLLM-BPI/Exo7MCQ",
+        hf_repo="cea-list-ia/Exo7MCQ",
         hf_subset="default",
         hf_avail_splits=["test"],
         evaluation_splits=["test"],
@@ -284,7 +284,7 @@ def _make_generative_task():
         name="exo7_generative",
         prompt_function=_make_generative_prompt_fn(),
         suite=["community"],
-        hf_repo="OpenLLM-BPI/Exo7MCQ",
+        hf_repo="cea-list-ia/Exo7MCQ",
         hf_subset="default",
         hf_avail_splits=["test"],
         evaluation_splits=["test"],
