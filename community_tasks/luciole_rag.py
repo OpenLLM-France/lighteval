@@ -61,7 +61,7 @@ query.
 
 Judge
 -----
-Optional LLM-as-judge factual evaluation, opt-in via
+LLM-as-judge factual and refusal evaluation, opt-in via
 ``LUCIOLE_RAG_USE_JUDGE=1``. Uses litellm by default; for a custom
 OpenAI-compatible endpoint set ``LLM_API_URL``, ``OPENAI_API_KEY`` and
 ``LLM_MODEL`` (with the ``openai/`` prefix).
@@ -653,8 +653,15 @@ Your task is to rate the **factual correctness and faithfulness** of the reasoni
 - **4**: The final answer is correct and the reasoning uses most of the supporting facts properly, with only minor omissions or imprecisions.
 - **5**: The final answer is correct, the reasoning correctly identifies and uses all the supporting facts, and the logical chain from evidence to answer is flawless.
 
+Also report whether the reasoning trace is in fact a **REFUSAL / abstention** — the
+assistant declined to answer, or stated the information is not in the documents —
+instead of a genuine attempt to answer. This question IS answerable from the
+context, so a refusal here is an unwanted **false refusal**. A refusal may be
+phrased in any way or language; set "refused" to true whenever the assistant did
+not actually attempt to answer.
+
 You MUST reply with ONLY a JSON object in this exact format (no other text):
-{"score": <int>, "justification": "<one sentence>"}
+{"score": <int>, "refused": <true|false>, "justification": "<one sentence>"}
 """
 
 
@@ -675,14 +682,21 @@ def build_factual_judge_messages(question, answer, options, gold, **kwargs) -> l
     ]
 
 
-def parse_factual_judge_response(text: str) -> int | None:
+def parse_factual_judge_response(text: str) -> dict | None:
+    """Return {"score": 1-5, "refused": bool} or None on parse failure."""
     if text is None:
         return None
     try:
         parsed = _extract_json(text)
         score = int(parsed["score"])
-        if 1 <= score <= 5:
-            return score
+        if not (1 <= score <= 5):
+            return None
+        refused = parsed.get("refused", False)
+        if isinstance(refused, str):
+            refused = refused.strip().lower() in ("true", "yes", "1", "oui")
+        else:
+            refused = bool(refused)
+        return {"score": score, "refused": refused}
     except Exception as exc:
         logger.warning("Factual judge response parse failed: %s", exc)
     return None
@@ -690,6 +704,10 @@ def parse_factual_judge_response(text: str) -> int | None:
 
 _DEFAULT_JUDGE_MODEL = os.getenv("LLM_MODEL", "openai/Mistral-Small-3.1-24B-Instruct-2503")
 _DEFAULT_JUDGE_URL = os.getenv("LLM_API_URL")
+# Max concurrent judge requests to the endpoint (litellm ThreadPoolExecutor size).
+# lighteval's default is 10; we cap lower to be gentle on the Lucie endpoint.
+_JUDGE_CONCURRENCY = int(os.getenv("LUCIOLE_RAG_JUDGE_CONCURRENCY", "5"))
+_JUDGE_BACKEND_OPTIONS = {"concurrent_requests": _JUDGE_CONCURRENCY}
 
 
 class LucioleRagFactualJudge(JudgeLLM):
@@ -709,10 +727,11 @@ class LucioleRagFactualJudge(JudgeLLM):
             short_judge_name="factual_judge",
             url=url,
             max_tokens=512,
+            backend_options=_JUDGE_BACKEND_OPTIONS,
         )
 
     def compute(self, responses, docs, **kwargs):
-        scored: dict[int, int | None] = {}
+        scored: dict[int, dict | None] = {}
         questions: list[str] = []
         answers: list[str] = []
         golds: list[str] = []
@@ -741,24 +760,27 @@ class LucioleRagFactualJudge(JudgeLLM):
                 supporting_facts=sf_lists,
                 context=contexts,
             )
-            for idx, score in zip(keep_idx, scores):
-                scored[idx] = score
+            for idx, parsed in zip(keep_idx, scores):
+                scored[idx] = parsed
 
         results = []
         for i in range(len(docs)):
-            score = scored[i]
-            if score is None:
+            parsed = scored[i]
+            if parsed is None:  # unanswerable row (skipped) or judge parse failure
                 results.append(
                     {
                         "factual_judge_accuracy_ge_5": None,
                         "factual_judge_accuracy_gt_4": None,
+                        "false_refusal_judge": None,
                     }
                 )
                 continue
+            score = parsed["score"]
             results.append(
                 {
                     "factual_judge_accuracy_ge_5": 1.0 if score >= 5 else 0.0,
                     "factual_judge_accuracy_gt_4": 1.0 if score >= 4 else 0.0,
+                    "false_refusal_judge": 1.0 if parsed["refused"] else 0.0,
                 }
             )
 
@@ -766,14 +788,143 @@ class LucioleRagFactualJudge(JudgeLLM):
 
 
 luciole_rag_factual_judge = SampleLevelMetricGrouping(
-    metric_name=["factual_judge_accuracy_ge_5", "factual_judge_accuracy_gt_4"],
+    metric_name=["factual_judge_accuracy_ge_5", "factual_judge_accuracy_gt_4", "false_refusal_judge"],
     higher_is_better={
         "factual_judge_accuracy_ge_5": True,
         "factual_judge_accuracy_gt_4": True,
+        "false_refusal_judge": False,
     },
     category=SamplingMethod.GENERATIVE,
     sample_level_fn=LucioleRagFactualJudge(),
-    corpus_level_fn=_rag_corpus_aggregators(["factual_judge_accuracy_ge_5", "factual_judge_accuracy_gt_4"]),
+    corpus_level_fn=_rag_corpus_aggregators(
+        ["factual_judge_accuracy_ge_5", "factual_judge_accuracy_gt_4", "false_refusal_judge"]
+    ),
+    batched_compute=True,
+)
+
+
+# ── refusal judge (semantic, unanswerable rows only) ────────────────
+
+
+JUDGE_REFUSAL_SYSTEM_PROMPT = """\
+You evaluate whether an AI assistant REFUSED to answer a question because the
+provided documents did not contain the answer.
+
+You will be given:
+1. A **question**.
+2. The assistant's **response**.
+
+The assistant was instructed to abstain (state that the answer is not in the
+provided documents) whenever the context lacks the answer. A refusal can be
+phrased in MANY different ways and in any language — e.g. "I cannot answer based
+on the provided context", "the documents do not contain this information",
+"Je ne peux pas répondre à partir des documents fournis", "Cette information
+n'est pas disponible". It does NOT have to match any exact template.
+
+Decide whether the response is a refusal/abstention (the assistant declines to
+answer, or states the information is not available in the documents) as opposed
+to an actual attempt to answer the question with a substantive answer.
+
+Reply with ONLY a JSON object (no other text):
+{"refused": true|false, "justification": "<one sentence>"}
+"""
+
+
+def build_refusal_judge_messages(question, answer, options, gold, **kwargs) -> list[dict]:
+    user_content = (
+        f"**Question:**\n{question}\n\n"
+        f"**Assistant response:**\n{answer}"
+    )
+    return [
+        {"role": "system", "content": JUDGE_REFUSAL_SYSTEM_PROMPT},
+        {"role": "user", "content": user_content},
+    ]
+
+
+def parse_refusal_judge_response(text: str) -> bool | None:
+    if text is None:
+        return None
+    try:
+        parsed = _extract_json(text)
+        val = parsed["refused"]
+        if isinstance(val, bool):
+            return val
+        if isinstance(val, (int, float)):
+            return bool(val)
+        if isinstance(val, str):
+            return val.strip().lower() in ("true", "yes", "1", "oui")
+    except Exception as exc:
+        logger.warning("Refusal judge response parse failed: %s", exc)
+    return None
+
+
+class LucioleRagRefusalJudge(JudgeLLM):
+    """Semantic refusal detection on UNANSWERABLE rows.
+
+    Complements the pattern-based ``refusal_recall``: it credits a refusal even
+    when it is phrased differently from the canonical refusal sentence, so the
+    gap between ``refusal_judge_recall`` and ``refusal_recall`` measures how many
+    valid refusals were off-template. Answerable rows are skipped (None).
+    """
+
+    def __init__(
+        self,
+        judge_model_name: str = _DEFAULT_JUDGE_MODEL,
+        judge_backend: str = "litellm",
+        url: str | None = _DEFAULT_JUDGE_URL,
+    ):
+        super().__init__(
+            judge_model_name=judge_model_name,
+            template=build_refusal_judge_messages,
+            process_judge_response=parse_refusal_judge_response,
+            judge_backend=judge_backend,
+            short_judge_name="refusal_judge",
+            url=url,
+            max_tokens=256,
+            backend_options=_JUDGE_BACKEND_OPTIONS,
+        )
+
+    def compute(self, responses, docs, **kwargs):
+        scored: dict[int, bool | None] = {}
+        questions: list[str] = []
+        answers: list[str] = []
+        keep_idx: list[int] = []
+
+        for i, doc in enumerate(docs):
+            spec = doc.specific or {}
+            if not spec.get("is_unanswerable", False):
+                scored[i] = None  # judge refusal only where a refusal is expected
+                continue
+            keep_idx.append(i)
+            questions.append(doc.query)
+            answers.append(responses[i].final_text[0] if responses[i].final_text else "")
+
+        if questions:
+            refusals, _, _ = self.judge.evaluate_answer_batch(
+                questions=questions,
+                answers=answers,
+                options=[None] * len(questions),
+                golds=[""] * len(questions),
+            )
+            for idx, refused in zip(keep_idx, refusals):
+                scored[idx] = refused
+
+        results = []
+        for i in range(len(docs)):
+            refused = scored[i]
+            if refused is None:  # answerable row, or judge parse failure
+                results.append({"refusal_judge_recall": None})
+            else:
+                results.append({"refusal_judge_recall": 1.0 if refused else 0.0})
+        return results
+
+
+luciole_rag_refusal_judge = SampleLevelMetricGrouping(
+    metric_name=["refusal_judge_recall"],
+    higher_is_better={"refusal_judge_recall": True},
+    category=SamplingMethod.GENERATIVE,
+    sample_level_fn=LucioleRagRefusalJudge(),
+    corpus_level_fn=_rag_corpus_aggregators(["refusal_judge_recall"]),
     batched_compute=True,
 )
 
@@ -818,6 +969,7 @@ _USE_JUDGE = os.getenv("LUCIOLE_RAG_USE_JUDGE", "0").strip().lower() in ("1", "t
 _RAG_METRICS = [luciole_rag_sample_metrics]
 if _USE_JUDGE:
     _RAG_METRICS.append(luciole_rag_factual_judge)
+    _RAG_METRICS.append(luciole_rag_refusal_judge)
 
 
 def _make_task(subset: str) -> LightevalTaskConfig:
