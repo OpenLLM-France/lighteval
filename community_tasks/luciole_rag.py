@@ -59,6 +59,18 @@ provided context...", "The available/retrieved documents...") still count
 as refusals. The prompt language (FR/EN) is detected per row from the
 query.
 
+Refusal metrics
+---------------
+The ``refusal_format_*`` metrics are pattern-based: they answer "did the
+response match a known refusal wording?", not "did the model refuse?". A model
+refusing in wording the patterns do not cover scores 0 there.
+``refusal_judge_recall`` answers the behavioural question and needs the judge;
+on Luciole-1B the two differ by ~30 points, so a low pattern score means
+"off-pattern", not "does not refuse".
+
+Responses are stripped of ``<think>`` reasoning traces before scoring; see
+``strip_reasoning``.
+
 Judge
 -----
 LLM-as-judge factual and refusal evaluation, opt-in via
@@ -151,6 +163,29 @@ def normalize_answer(answer: str) -> str:
 
 def _normalize_spaces(text: str) -> str:
     return " ".join(text.lower().split())
+
+
+# Reasoning models emit a <think>...</think> trace before their answer. Metrics
+# and judges must see the answer only: the trace routinely restates the gold
+# string and rehearses refusal wording, which inflates EM and skews refusal
+# detection. Disable with LUCIOLE_RAG_STRIP_REASONING=0.
+STRIP_REASONING = os.getenv("LUCIOLE_RAG_STRIP_REASONING", "1").strip().lower() in ("1", "true", "yes", "on")
+
+_THINK_CLOSED_RE = re.compile(r"<think>.*?</think>", re.DOTALL | re.IGNORECASE)
+_THINK_UNCLOSED_RE = re.compile(r"<think>.*\Z", re.DOTALL | re.IGNORECASE)
+
+
+def strip_reasoning(text: str) -> str:
+    """Drop ``<think>`` traces, keeping only the final answer. A trace left
+    unclosed (generation budget spent mid-reasoning) strips to an empty string,
+    the honest score for a sample that never produced an answer. No-op on
+    responses without ``<think>`` tags.
+    """
+    if not text or not STRIP_REASONING:
+        return text
+    text = _THINK_CLOSED_RE.sub(" ", text)
+    text = _THINK_UNCLOSED_RE.sub(" ", text)
+    return text.strip()
 
 
 _NORMALIZED_REFUSAL_PHRASES = tuple(
@@ -536,22 +571,22 @@ _SAMPLE_METRIC_NAMES = [
     "citation_recall_fuzzy",
     "citation_f1_fuzzy",
     "distractor_citation_rate",
-    "refusal_recall",
-    "refusal_precision",
-    "false_refusal_rate",
+    "refusal_format_compliance",
+    "refusal_format_precision",
+    "false_refusal_format_rate",
 ]
 
 
 class LucioleRagSampleMetrics(SampleLevelComputation):
     """Per-sample metrics with answerability-conditional gating.
 
-    On answerable rows: emits citation/quality metrics; refusal_recall is None
-    (the row can't measure recall of unanswerables); false_refusal_rate is 1
-    iff the model refused; refusal_precision contributes 0 if refused, None
+    On answerable rows: emits citation/quality metrics; refusal_format_compliance is None
+    (the row can't measure recall of unanswerables); false_refusal_format_rate is 1
+    iff the model refused; refusal_format_precision contributes 0 if refused, None
     otherwise (so the corpus mean over non-None gives correct-refusals/all-refusals).
 
-    On unanswerable rows: citation/quality metrics are None (skipped); refusal_recall
-    is 1 iff refused; false_refusal_rate is None; refusal_precision contributes 1
+    On unanswerable rows: citation/quality metrics are None (skipped); refusal_format_compliance
+    is 1 iff refused; false_refusal_format_rate is None; refusal_format_precision contributes 1
     if refused, None otherwise.
     """
 
@@ -561,7 +596,7 @@ class LucioleRagSampleMetrics(SampleLevelComputation):
         is_unanswerable = bool(spec.get("is_unanswerable", False))
         reference_answer = spec.get("reference_answer", "") or ""
 
-        response_text = model_response.final_text[0] if model_response.final_text else ""
+        response_text = strip_reasoning(model_response.final_text[0] if model_response.final_text else "")
         refused = detect_refusal(response_text)
 
         if is_unanswerable:
@@ -575,9 +610,9 @@ class LucioleRagSampleMetrics(SampleLevelComputation):
                 "citation_recall_fuzzy": None,
                 "citation_f1_fuzzy": None,
                 "distractor_citation_rate": None,
-                "refusal_recall": 1.0 if refused else 0.0,
-                "refusal_precision": 1.0 if refused else None,
-                "false_refusal_rate": None,
+                "refusal_format_compliance": 1.0 if refused else 0.0,
+                "refusal_format_precision": 1.0 if refused else None,
+                "false_refusal_format_rate": None,
             }
 
         cited = extract_cited_titles(response_text)
@@ -603,9 +638,9 @@ class LucioleRagSampleMetrics(SampleLevelComputation):
             "citation_recall_fuzzy": recall_fuzzy,
             "citation_f1_fuzzy": citation_f1_fuzzy,
             "distractor_citation_rate": distractor_rate,
-            "refusal_recall": None,
-            "refusal_precision": 0.0 if refused else None,
-            "false_refusal_rate": 1.0 if refused else 0.0,
+            "refusal_format_compliance": None,
+            "refusal_format_precision": 0.0 if refused else None,
+            "false_refusal_format_rate": 1.0 if refused else 0.0,
         }
 
 
@@ -619,9 +654,9 @@ _HIGHER_IS_BETTER = {
     "citation_recall_fuzzy": True,
     "citation_f1_fuzzy": True,
     "distractor_citation_rate": False,
-    "refusal_recall": True,
-    "refusal_precision": True,
-    "false_refusal_rate": False,
+    "refusal_format_compliance": True,
+    "refusal_format_precision": True,
+    "false_refusal_format_rate": False,
 }
 
 
@@ -746,7 +781,7 @@ class LucioleRagFactualJudge(JudgeLLM):
                 continue
             keep_idx.append(i)
             questions.append(doc.query)
-            answers.append(responses[i].final_text[0] if responses[i].final_text else "")
+            answers.append(strip_reasoning(responses[i].final_text[0] if responses[i].final_text else ""))
             golds.append(spec.get("reference_answer", "") or "")
             sf_lists.append(list(spec.get("supporting_facts_titles", []) or []))
             contexts.append(spec.get("context", "") or "")
@@ -861,10 +896,12 @@ def parse_refusal_judge_response(text: str) -> bool | None:
 class LucioleRagRefusalJudge(JudgeLLM):
     """Semantic refusal detection on UNANSWERABLE rows.
 
-    Complements the pattern-based ``refusal_recall``: it credits a refusal even
-    when it is phrased differently from the canonical refusal sentence, so the
-    gap between ``refusal_judge_recall`` and ``refusal_recall`` measures how many
-    valid refusals were off-template. Answerable rows are skipped (None).
+    Complements the pattern-based ``refusal_format_compliance``: it credits a
+    refusal however it is worded, so the gap between the two measures how many
+    valid refusals the patterns miss. Answerable rows are skipped (None), and so
+    are rows where nothing was generated -- which the pattern metric instead
+    scores 0, as a compliance failure. The two therefore run on slightly
+    different denominators when a model truncates.
     """
 
     def __init__(
@@ -895,9 +932,17 @@ class LucioleRagRefusalJudge(JudgeLLM):
             if not spec.get("is_unanswerable", False):
                 scored[i] = None  # judge refusal only where a refusal is expected
                 continue
+            answer = strip_reasoning(responses[i].final_text[0] if responses[i].final_text else "")
+            if not answer.strip():
+                # Nothing was produced (empty generation, or a <think> trace that
+                # ran out of budget). That is neither a refusal nor an attempt to
+                # answer, so it is excluded rather than counted as a failure to
+                # refuse, which would deflate the recall with unrelated failures.
+                scored[i] = None
+                continue
             keep_idx.append(i)
             questions.append(doc.query)
-            answers.append(responses[i].final_text[0] if responses[i].final_text else "")
+            answers.append(answer)
 
         if questions:
             refusals, _, _ = self.judge.evaluate_answer_batch(
@@ -912,7 +957,7 @@ class LucioleRagRefusalJudge(JudgeLLM):
         results = []
         for i in range(len(docs)):
             refused = scored[i]
-            if refused is None:  # answerable row, or judge parse failure
+            if refused is None:  # answerable row, empty answer, or judge parse failure
                 results.append({"refusal_judge_recall": None})
             else:
                 results.append({"refusal_judge_recall": 1.0 if refused else 0.0})
