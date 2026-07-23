@@ -74,9 +74,17 @@ Responses are stripped of ``<think>`` reasoning traces before scoring; see
 Judge
 -----
 LLM-as-judge factual and refusal evaluation, opt-in via
-``LUCIOLE_RAG_USE_JUDGE=1``. Uses litellm by default; for a custom
-OpenAI-compatible endpoint set ``LLM_API_URL``, ``OPENAI_API_KEY`` and
-``LLM_MODEL`` (with the ``openai/`` prefix).
+``LUCIOLE_RAG_USE_JUDGE=1``. Backend is set by ``LUCIOLE_RAG_JUDGE_BACKEND``
+(default ``litellm``); for a custom OpenAI-compatible endpoint set
+``LLM_API_URL``, ``OPENAI_API_KEY`` and ``LLM_MODEL`` (with the ``openai/``
+prefix).
+
+Compute nodes without outbound network (Jean Zay) need a local backend: set
+``LUCIOLE_RAG_JUDGE_BACKEND=vllm`` (or ``transformers``) and point
+``LLM_MODEL`` at judge weights on disk, sizing the judge's share of the GPU
+with ``LIGHTEVAL_JUDGE_GPU_MEM_UTIL``. Running the eval with ``--save-details``
+and judging the saved details off-cluster afterwards avoids the in-job judge
+entirely.
 """
 
 import hashlib
@@ -89,6 +97,7 @@ import re
 import numpy as np
 
 from lighteval.metrics.metrics_sample import JudgeLLM, SampleLevelComputation
+from lighteval.metrics.utils.llm_as_judge import JudgeLM
 from lighteval.metrics.utils.metric_utils import SampleLevelMetricGrouping
 from lighteval.metrics.utils.stderr import mean_stderr
 from lighteval.tasks.lighteval_task import LightevalTaskConfig
@@ -744,14 +753,71 @@ _DEFAULT_JUDGE_URL = os.getenv("LLM_API_URL")
 _JUDGE_CONCURRENCY = int(os.getenv("LUCIOLE_RAG_JUDGE_CONCURRENCY", "5"))
 _JUDGE_BACKEND_OPTIONS = {"concurrent_requests": _JUDGE_CONCURRENCY}
 
+# "litellm" (default), "openai" and "tgi" call a remote endpoint. Where the
+# compute nodes have no outbound network, use "vllm" or "transformers": they
+# load the judge in-process, so point LLM_MODEL at local weights (or a cached
+# repo id with HF_HUB_OFFLINE=1) and leave LLM_API_URL unset.
+_DEFAULT_JUDGE_BACKEND = os.getenv("LUCIOLE_RAG_JUDGE_BACKEND", "litellm").strip().lower()
+_LOCAL_JUDGE_BACKENDS = ("vllm", "transformers")
 
-class LucioleRagFactualJudge(JudgeLLM):
+
+class _OfflineCapableJudge(JudgeLLM):
+    """``JudgeLLM`` that builds ``JudgeLM`` directly for the local backends.
+
+    ``backend_options`` is litellm-only, and the parent validates ``vllm`` /
+    ``transformers`` against the HF Hub -- harmless offline today only because
+    ``list_models`` returns an unconsumed generator. Bypassing both keeps the
+    air-gapped path from depending on that. Weights load lazily, on the first
+    judge call; the judge then shares the job's GPUs with the evaluated model,
+    so size its share with ``LIGHTEVAL_JUDGE_GPU_MEM_UTIL`` and
+    ``LIGHTEVAL_JUDGE_MAX_MODEL_LEN``. Note that lighteval hardcodes
+    ``temperature=0.8`` for the vllm backend, so that judge is stochastic
+    across runs.
+    """
+
+    def __init__(
+        self,
+        *,
+        judge_model_name: str,
+        template,
+        process_judge_response,
+        judge_backend: str,
+        short_judge_name: str,
+        url: str | None,
+        max_tokens: int,
+    ):
+        if judge_backend in _LOCAL_JUDGE_BACKENDS:
+            self.short_judge_name = short_judge_name
+            self.judge = JudgeLM(
+                model=judge_model_name,
+                templates=template,
+                process_judge_response=process_judge_response,
+                judge_backend=judge_backend,
+                url=None,
+                api_key=None,
+                max_tokens=max_tokens,
+            )
+            return
+
+        super().__init__(
+            judge_model_name=judge_model_name,
+            template=template,
+            process_judge_response=process_judge_response,
+            judge_backend=judge_backend,
+            short_judge_name=short_judge_name,
+            url=url,
+            max_tokens=max_tokens,
+            backend_options=_JUDGE_BACKEND_OPTIONS,
+        )
+
+
+class LucioleRagFactualJudge(_OfflineCapableJudge):
     """1-5 factual-faithfulness judge, skipped on unanswerable rows."""
 
     def __init__(
         self,
         judge_model_name: str = _DEFAULT_JUDGE_MODEL,
-        judge_backend: str = "litellm",
+        judge_backend: str = _DEFAULT_JUDGE_BACKEND,
         url: str | None = _DEFAULT_JUDGE_URL,
     ):
         super().__init__(
@@ -762,7 +828,6 @@ class LucioleRagFactualJudge(JudgeLLM):
             short_judge_name="factual_judge",
             url=url,
             max_tokens=512,
-            backend_options=_JUDGE_BACKEND_OPTIONS,
         )
 
     def compute(self, responses, docs, **kwargs):
@@ -893,7 +958,7 @@ def parse_refusal_judge_response(text: str) -> bool | None:
     return None
 
 
-class LucioleRagRefusalJudge(JudgeLLM):
+class LucioleRagRefusalJudge(_OfflineCapableJudge):
     """Semantic refusal detection on UNANSWERABLE rows.
 
     Complements the pattern-based ``refusal_format_compliance``: it credits a
@@ -907,7 +972,7 @@ class LucioleRagRefusalJudge(JudgeLLM):
     def __init__(
         self,
         judge_model_name: str = _DEFAULT_JUDGE_MODEL,
-        judge_backend: str = "litellm",
+        judge_backend: str = _DEFAULT_JUDGE_BACKEND,
         url: str | None = _DEFAULT_JUDGE_URL,
     ):
         super().__init__(
@@ -918,7 +983,6 @@ class LucioleRagRefusalJudge(JudgeLLM):
             short_judge_name="refusal_judge",
             url=url,
             max_tokens=256,
-            backend_options=_JUDGE_BACKEND_OPTIONS,
         )
 
     def compute(self, responses, docs, **kwargs):
