@@ -1343,7 +1343,9 @@ def legal_summarization(line, task_name: str = None):
 
 
 def mgsm(line, question_key, answer_key, task_name: str = None):
-    if line["answer"] is not None:
+    # Some MGSM variants (e.g. lightonai/mgsm-rev2) ship only question + answer_number,
+    # with no chain-of-thought "answer" field; fall back to answer_number in that case.
+    if line.get("answer") is not None:
         query = f"{line['question']}\n{answer_key}"
         gold = f" {line['answer'][len(answer_key) + 1 :]}"
     else:
