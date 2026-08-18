@@ -303,7 +303,8 @@ class JudgeLM:
     def __call_vllm(self, prompt):
         from vllm import TokensPrompt
 
-        tokenized = [self.tokenizer.apply_chat_template(p) for p in prompt]
+        # add_generation_prompt=True opens the assistant turn so the model answers instead of derailing.
+        tokenized = [self.tokenizer.apply_chat_template(p, add_generation_prompt=True) for p in prompt]
         output = self.pipe.generate(
             # prompt_token_ids=tokenized, # vllm 0.10.1
             [TokensPrompt(prompt_token_ids=input) for input in tokenized],
