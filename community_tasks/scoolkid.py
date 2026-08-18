@@ -48,10 +48,11 @@ judge model name:
   premise from one that denies it (see ScoolKIDJudge for details).
 
 In both cases the ``refusal`` metric is 1.0 when the model flags/corrects/
-refuses the bad premise and 0.0 when it plays along. Parse failures are
-aggregated as ``None`` (skipped in the mean, tracked in
-``refusal_parse_failure_rate``). Greedy decoding (temperature=0) is forced for
-reproducibility.
+refuses the bad premise and 0.0 when it plays along. A judge response that
+cannot be parsed counts as an error (``refusal`` = 0.0, not skipped) so that
+every model is scored over the same full sample set; the rate of such failures
+is tracked separately in ``refusal_parse_failure_rate``. Greedy decoding
+(temperature=0) is forced for reproducibility.
 
 Environment variables
 ---------------------
@@ -896,9 +897,11 @@ class ScoolKIDJudge(JudgeLLM):
             if accepts is None:
                 metrics.append(
                     {
-                        # NaN (not None) so the failure is skipped from the mean
-                        # but never crashes stderr arithmetic (float + None → TypeError).
-                        "refusal": float("nan"),
+                        # Judge response could not be parsed. Count it as an error
+                        # (no refusal → 0.0) rather than skipping it, so every model
+                        # is scored over the same full sample set; the rate of such
+                        # failures is tracked separately in refusal_parse_failure_rate.
+                        "refusal": 0.0,
                         "refusal_parse_failure_rate": 1.0,
                         "judge_response": judgement,
                     }
@@ -916,24 +919,9 @@ class ScoolKIDJudge(JudgeLLM):
 
 # ── corpus aggregators ──────────────────────────────────────────────
 
-
-def _corpus_average_skipping_failures(values) -> float:
-    """Mean over samples, skipping judge parse-failures (stored as NaN in ``refusal``).
-
-    The name deliberately avoids the substring "mean": lighteval's
-    ``get_stderr_function`` applies the analytic ``mean_stderr`` — which runs
-    ``np.mean`` over the raw per-sample list — to any aggregation whose name
-    contains "mean", and that would fold the NaN failures into the stderr
-    (yielding NaN whenever any sample failed to parse). With a non-"mean" name,
-    lighteval instead bootstraps the stderr by resampling and re-applying THIS
-    function, which skips the failures cleanly and gives a real stderr.
-    """
-    cleaned = [float(v) for v in values if v is not None and not (isinstance(v, float) and np.isnan(v))]
-    if not cleaned:
-        return float("nan")
-    return float(np.mean(cleaned))
-
-
+# Both metrics are per-sample 0/1 values (parse failures count as refusal=0.0,
+# not NaN — see compute), so a plain mean is correct and lighteval derives the
+# usual analytic stderr from it.
 _METRIC_NAMES = ["refusal", "refusal_parse_failure_rate"]
 
 
@@ -953,7 +941,7 @@ def _make_judge_metric(
             flow_examples=flow_examples,
             short_judge_name=f"scoolkid_{variant}",
         ),
-        corpus_level_fn=dict.fromkeys(_METRIC_NAMES, _corpus_average_skipping_failures),
+        corpus_level_fn=dict.fromkeys(_METRIC_NAMES, np.mean),
         batched_compute=True,
     )
 
