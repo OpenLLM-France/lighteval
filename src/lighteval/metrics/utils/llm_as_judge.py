@@ -312,7 +312,11 @@ class JudgeLM:
         # `return_dict=False` returns a flat list[int] of token ids. transformers v5
         # changed the default to True (returns a BatchEncoding), which would be passed
         # whole as prompt_token_ids and break vLLM. tokenize=True for the same reason.
-        tokenized = [self.tokenizer.apply_chat_template(p, tokenize=True, return_dict=False) for p in prompt]
+        # add_generation_prompt=True opens the assistant turn so the model answers instead of derailing.
+        tokenized = [
+            self.tokenizer.apply_chat_template(p, tokenize=True, return_dict=False, add_generation_prompt=True)
+            for p in prompt
+        ]
         output = self.pipe.generate(
             # prompt_token_ids=tokenized, # vllm 0.10.1
             [TokensPrompt(prompt_token_ids=input) for input in tokenized],
