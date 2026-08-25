@@ -3326,6 +3326,47 @@ mgsm_tasks = [
         Language.TELUGU,
     ]
 ]
+
+# MGSM rev2: revised/updated MGSM data (test split only, no CoT), from
+# https://huggingface.co/datasets/lightonai/mgsm-rev2
+# Same 11 languages and (question, answer_number) schema as the original MGSM, so it
+# reuses the same QA prompt and metric. There is no train split, so it is run zero-shot.
+mgsm_rev2_tasks = [
+    LightevalTaskConfig(
+        name=f"mgsm_rev2_{language.value}",
+        prompt_function=get_qa_prompt_function(
+            language,
+            lambda line: {
+                "question": line["question"],
+                "choices": [str(line["answer_number"])],
+            },
+        ),
+        suite=("lighteval",),
+        hf_repo="lightonai/mgsm-rev2",
+        hf_revision="1463c6dc7991a8751b8e28e76f6c561b9201eb55",
+        hf_subset=standardize_tag(language.value),
+        evaluation_splits=("test",),
+        few_shots_split=None,
+        generation_size=25,
+        metrics=[
+            MultilingualQuasiExactMatchMetric(language, "full"),
+        ],
+        stop_sequence=["\n"],
+    )
+    for language in [
+        Language.ENGLISH,
+        Language.SPANISH,
+        Language.FRENCH,
+        Language.GERMAN,
+        Language.RUSSIAN,
+        Language.CHINESE,
+        Language.JAPANESE,
+        Language.THAI,
+        Language.SWAHILI,
+        Language.BENGALI,
+        Language.TELUGU,
+    ]
+]
 # African MGSM: MGSM for African Languages
 # From https://arxiv.org/abs/2406.03368. Human translated MGSM.
 afri_mgsm_tasks = [
@@ -3376,6 +3417,7 @@ TASKS_TABLE.extend(
         *cmath_tasks,
         *mathlogicqa_rus_tasks,
         *mgsm_tasks,
+        *mgsm_rev2_tasks,
         *afri_mgsm_tasks,
     ]
 )
