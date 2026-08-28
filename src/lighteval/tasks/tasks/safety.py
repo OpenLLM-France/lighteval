@@ -32,6 +32,12 @@ Benchmarks:
     - harmbench_standard:{category}  (walledai/HarmBench, `standard` subset, 6 categories)
     - harmbench_contextual:{category} (walledai/HarmBench, `contextual` subset, 6 categories)
     - aya_red_teaming_{lang} (walledai/AyaRedTeaming, 8 languages, ISO 639-3 codes: ara/eng/fil/fra/hin/rus/srp/spa)
+    - advbench_{lang} (simonycl/multilingual_advbench, AdvBench translated into 23 languages, 2-letter codes: ar/cs/de/el/en/es/fa/fr/he/hi/id/it/ja/ko/nl/pl/pt/ro/ru/tr/uk/vi/zh)
+    - polyguard_{lang} (ToxicityPrompts/PolyGuardPrompts, harmful prompts only, 17 languages, 2-letter codes: ar/cs/de/en/es/fr/hi/it/ja/ko/nl/pl/pt/ru/sv/th/zh)
+
+All benchmarks are red-teaming sets: each prompt is a malicious request and we
+measure how often the model refuses. The Llama Guard judge is multilingual, so
+the same metric applies across every language.
 
 Metric: safety_rate — fraction of responses judged safe (higher is better).
 
@@ -43,8 +49,11 @@ Usage:
     lighteval vllm "model_name=..." "community|harmbench_standard:cybercrime_intrusion|0"
     lighteval vllm "model_name=..." "community|harmbench_contextual|0"
     lighteval vllm "model_name=..." "community|aya_red_teaming_fra|0"
+    lighteval vllm "model_name=..." "community|advbench_fr|0"
+    lighteval vllm "model_name=..." "community|polyguard_fr|0"
 """
 
+import html
 import logging
 
 import numpy as np
@@ -246,6 +255,21 @@ def regular_prompt(line, task_name: str = None):
     return Doc(
         task_name=task_name,
         query=line["prompt"],
+        choices=None,
+        gold_index=None,
+    )
+
+
+def unescape_prompt(line, task_name: str = None):
+    """Like regular_prompt, but unescapes HTML entities in the prompt.
+
+    multilingual_advbench prompts carry HTML entities left over from its
+    machine-translation pipeline (e.g. ``d&#39;un`` -> ``d'un``); unescape them
+    so the model sees natural text. Harmless for prompts without entities.
+    """
+    return Doc(
+        task_name=task_name,
+        query=html.unescape(line["prompt"]),
         choices=None,
         gold_index=None,
     )
@@ -539,6 +563,153 @@ aya_red_teaming_noeval_tasks = [
 ]
 
 
+# ---------------------------------------------------------------------------
+# Multilingual AdvBench (https://huggingface.co/datasets/simonycl/multilingual_advbench)
+# ---------------------------------------------------------------------------
+# The 520 AdvBench harmful behaviors machine-translated into 22 languages (plus
+# the English original). One HF config per language, each with a `prompt` and a
+# `target` affirmative prefix; we use only `prompt`. Prompts contain HTML
+# entities from the translation pipeline, so we unescape them (unescape_prompt).
+# The Llama Guard judge (reused via llm_judge_safety) is multilingual, exactly
+# as for the Aya red-teaming tasks below.
+
+# HF config name == language code the dataset ships (2-letter, mostly ISO 639-1).
+MULTILINGUAL_ADVBENCH_LANGUAGES = [
+    "ar",  # Arabic
+    "cs",  # Czech
+    "de",  # German
+    "el",  # Greek
+    "en",  # English
+    "es",  # Spanish
+    "fa",  # Persian
+    "fr",  # French
+    "he",  # Hebrew
+    "hi",  # Hindi
+    "id",  # Indonesian
+    "it",  # Italian
+    "ja",  # Japanese
+    "ko",  # Korean
+    "nl",  # Dutch
+    "pl",  # Polish
+    "pt",  # Portuguese
+    "ro",  # Romanian
+    "ru",  # Russian
+    "tr",  # Turkish
+    "uk",  # Ukrainian
+    "vi",  # Vietnamese
+    "zh",  # Chinese
+]
+
+
+multilingual_advbench_tasks = [
+    LightevalTaskConfig(
+        name=f"advbench_{lang}",
+        prompt_function=unescape_prompt,
+        hf_repo="simonycl/multilingual_advbench",
+        hf_subset=lang,
+        metrics=[llm_judge_safety],
+        hf_avail_splits=["train"],
+        evaluation_splits=["train"],
+        generation_size=1024,
+        stop_sequence=[],
+        version="0.1",
+    )
+    for lang in MULTILINGUAL_ADVBENCH_LANGUAGES
+]
+
+multilingual_advbench_noeval_tasks = [
+    LightevalTaskConfig(
+        name=f"advbench_noeval_{lang}",
+        prompt_function=unescape_prompt,
+        hf_repo="simonycl/multilingual_advbench",
+        hf_subset=lang,
+        metrics=[dummy_metric],
+        hf_avail_splits=["train"],
+        evaluation_splits=["train"],
+        generation_size=1024,
+        stop_sequence=[],
+        version="0.1",
+    )
+    for lang in MULTILINGUAL_ADVBENCH_LANGUAGES
+]
+
+
+# ---------------------------------------------------------------------------
+# PolyGuardPrompts (https://huggingface.co/datasets/ToxicityPrompts/PolyGuardPrompts)
+# ---------------------------------------------------------------------------
+# Multilingual prompt/response safety pairs (Kumar et al. 2025, "PolyGuard").
+# The dataset ships a single `default` config (`test` split) mixing 17 languages
+# and both harmful and unharmful prompts. For a red-teaming benchmark we keep
+# only the *harmful* prompts (prompt_harm_label == "harmful") of a given
+# language and use the `prompt` column; the reference `response` is ignored.
+# The Llama Guard judge (reused via llm_judge_safety) is multilingual.
+
+# language code -> value of the dataset's `language` column (full English name)
+POLYGUARD_LANGUAGES = {
+    "ar": "Arabic",
+    "cs": "Czech",
+    "de": "German",
+    "en": "English",
+    "es": "Spanish",
+    "fr": "French",
+    "hi": "Hindi",
+    "it": "Italian",
+    "ja": "Japanese",
+    "ko": "Korean",
+    "nl": "Dutch",
+    "pl": "Polish",
+    "pt": "Portuguese",
+    "ru": "Russian",
+    "sv": "Swedish",
+    "th": "Thai",
+    "zh": "Chinese",
+}
+
+
+def _polyguard_filter(language_name):
+    """Keep only harmful prompts in the requested language.
+
+    Module-scope factory (not an inline lambda in the list-comp below) so each
+    task binds its own language — see _harmbench_category_filter.
+    """
+    return lambda row: row["prompt_harm_label"] == "harmful" and row["language"] == language_name
+
+
+polyguard_tasks = [
+    LightevalTaskConfig(
+        name=f"polyguard_{code}",
+        prompt_function=regular_prompt,
+        hf_repo="ToxicityPrompts/PolyGuardPrompts",
+        hf_subset="default",
+        hf_filter=_polyguard_filter(language_name),
+        metrics=[llm_judge_safety],
+        hf_avail_splits=["test"],
+        evaluation_splits=["test"],
+        generation_size=1024,
+        stop_sequence=[],
+        version="0.1",
+    )
+    for code, language_name in POLYGUARD_LANGUAGES.items()
+]
+
+polyguard_noeval_tasks = [
+    LightevalTaskConfig(
+        name=f"polyguard_noeval_{code}",
+        prompt_function=regular_prompt,
+        hf_repo="ToxicityPrompts/PolyGuardPrompts",
+        hf_subset="default",
+        hf_filter=_polyguard_filter(language_name),
+        metrics=[dummy_metric],
+        hf_avail_splits=["test"],
+        evaluation_splits=["test"],
+        generation_size=1024,
+        stop_sequence=[],
+        version="0.1",
+    )
+    for code, language_name in POLYGUARD_LANGUAGES.items()
+]
+
+
 TASKS_TABLE = [
     advbench_task,
     advbench_noeval_task,
@@ -550,4 +721,8 @@ TASKS_TABLE = [
     *harmbench_contextual_noeval_tasks,
     *aya_red_teaming_tasks,
     *aya_red_teaming_noeval_tasks,
+    *multilingual_advbench_tasks,
+    *multilingual_advbench_noeval_tasks,
+    *polyguard_tasks,
+    *polyguard_noeval_tasks,
 ]
