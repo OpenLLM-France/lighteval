@@ -34,6 +34,7 @@ Benchmarks:
     - aya_red_teaming_{lang} (walledai/AyaRedTeaming, 8 languages, ISO 639-3 codes: ara/eng/fil/fra/hin/rus/srp/spa)
     - advbench_{lang} (simonycl/multilingual_advbench, AdvBench translated into 23 languages, 2-letter codes: ar/cs/de/el/en/es/fa/fr/he/hi/id/it/ja/ko/nl/pl/pt/ro/ru/tr/uk/vi/zh)
     - polyguard_{lang} (ToxicityPrompts/PolyGuardPrompts, harmful prompts only, 17 languages, 2-letter codes: ar/cs/de/en/es/fr/hi/it/ja/ko/nl/pl/pt/ru/sv/th/zh)
+    - wildjailbreak (allenai/wildjailbreak, `eval` subset, adversarial harmful prompts only)
 
 All benchmarks are red-teaming sets: each prompt is a malicious request and we
 measure how often the model refuses. The Llama Guard judge is multilingual, so
@@ -51,6 +52,7 @@ Usage:
     lighteval vllm "model_name=..." "community|aya_red_teaming_fra|0"
     lighteval vllm "model_name=..." "community|advbench_fr|0"
     lighteval vllm "model_name=..." "community|polyguard_fr|0"
+    lighteval vllm "model_name=..." "community|wildjailbreak|0"
 """
 
 import html
@@ -61,13 +63,19 @@ from datasets import DatasetDict
 from datasets import load_dataset as _hf_load_dataset
 from huggingface_hub import hf_hub_download
 
-from lighteval.metrics.metrics_sample import JudgeLLM, SampleLevelComputation
-from lighteval.metrics.utils.metric_utils import SampleLevelMetric, SampleLevelMetricGrouping
+from lighteval.metrics.metrics_sample import JudgeLLM
+from lighteval.metrics.utils.metric_utils import SampleLevelMetricGrouping
 from lighteval.tasks.lighteval_task import LightevalTask, LightevalTaskConfig
 from lighteval.tasks.requests import Doc, SamplingMethod
 
 
 logger = logging.getLogger(__name__)
+
+
+# Max number of tokens the evaluated model may generate for each prompt. Bump
+# this to give thinking models more room; kept as a single knob for the whole
+# file so every task stays consistent.
+GENERATION_SIZE = 1024
 
 
 # Which generation of Llama Guard to use as the safety judge: 3 or 4.
@@ -229,20 +237,6 @@ llm_judge_safety = SampleLevelMetricGrouping(
 )
 
 
-class DummyMetric(SampleLevelComputation):
-    def compute(self, model_response, doc, **kwargs):
-        return 1
-
-
-dummy_metric = SampleLevelMetric(
-    metric_name="dummy",
-    higher_is_better=True,
-    category=SamplingMethod.GENERATIVE,
-    sample_level_fn=DummyMetric(),
-    corpus_level_fn=np.mean,
-)
-
-
 # ---------------------------------------------------------------------------
 # AdvBench (https://huggingface.co/datasets/walledai/AdvBench)
 # ---------------------------------------------------------------------------
@@ -283,20 +277,7 @@ advbench_task = LightevalTaskConfig(
     metrics=[llm_judge_safety],
     hf_avail_splits=["train"],
     evaluation_splits=["train"],
-    generation_size=1024,
-    stop_sequence=[],
-    version="0.1",
-)
-
-advbench_noeval_task = LightevalTaskConfig(
-    name="advbench_noeval",
-    prompt_function=regular_prompt,
-    hf_repo="walledai/AdvBench",
-    hf_subset="default",
-    metrics=[dummy_metric],
-    hf_avail_splits=["train"],
-    evaluation_splits=["train"],
-    generation_size=1024,
+    generation_size=GENERATION_SIZE,
     stop_sequence=[],
     version="0.1",
 )
@@ -373,23 +354,7 @@ hexphi_tasks = [
         metrics=[llm_judge_safety],
         hf_avail_splits=["train"],
         evaluation_splits=["train"],
-        generation_size=1024,
-        stop_sequence=[],
-        version="0.1",
-    )
-    for suffix in HEXPHI_CATEGORIES
-]
-
-hexphi_noeval_tasks = [
-    LightevalTaskConfig(
-        name=f"hexphi_noeval:{suffix}",
-        prompt_function=regular_prompt,
-        hf_repo=HEXPHI_REPO,
-        hf_subset="default",
-        metrics=[dummy_metric],
-        hf_avail_splits=["train"],
-        evaluation_splits=["train"],
-        generation_size=1024,
+        generation_size=GENERATION_SIZE,
         stop_sequence=[],
         version="0.1",
     )
@@ -451,24 +416,7 @@ harmbench_standard_tasks = [
         metrics=[llm_judge_safety],
         hf_avail_splits=["train"],
         evaluation_splits=["train"],
-        generation_size=1024,
-        stop_sequence=[],
-        version="0.1",
-    )
-    for category in HARMBENCH_CATEGORIES
-]
-
-harmbench_standard_noeval_tasks = [
-    LightevalTaskConfig(
-        name=f"harmbench_standard_noeval:{category}",
-        prompt_function=regular_prompt,
-        hf_repo="walledai/HarmBench",
-        hf_subset="standard",
-        hf_filter=_harmbench_category_filter(category),
-        metrics=[dummy_metric],
-        hf_avail_splits=["train"],
-        evaluation_splits=["train"],
-        generation_size=1024,
+        generation_size=GENERATION_SIZE,
         stop_sequence=[],
         version="0.1",
     )
@@ -485,24 +433,7 @@ harmbench_contextual_tasks = [
         metrics=[llm_judge_safety],
         hf_avail_splits=["train"],
         evaluation_splits=["train"],
-        generation_size=1024,
-        stop_sequence=[],
-        version="0.1",
-    )
-    for category in HARMBENCH_CATEGORIES
-]
-
-harmbench_contextual_noeval_tasks = [
-    LightevalTaskConfig(
-        name=f"harmbench_contextual_noeval:{category}",
-        prompt_function=harmbench_contextual_prompt,
-        hf_repo="walledai/HarmBench",
-        hf_subset="contextual",
-        hf_filter=_harmbench_category_filter(category),
-        metrics=[dummy_metric],
-        hf_avail_splits=["train"],
-        evaluation_splits=["train"],
-        generation_size=1024,
+        generation_size=GENERATION_SIZE,
         stop_sequence=[],
         version="0.1",
     )
@@ -539,23 +470,7 @@ aya_red_teaming_tasks = [
         metrics=[llm_judge_safety],
         hf_avail_splits=[split],
         evaluation_splits=[split],
-        generation_size=1024,
-        stop_sequence=[],
-        version="0.1",
-    )
-    for code, split in AYA_RED_TEAMING_LANGUAGES.items()
-]
-
-aya_red_teaming_noeval_tasks = [
-    LightevalTaskConfig(
-        name=f"aya_red_teaming_noeval_{code}",
-        prompt_function=regular_prompt,
-        hf_repo="walledai/AyaRedTeaming",
-        hf_subset="default",
-        metrics=[dummy_metric],
-        hf_avail_splits=[split],
-        evaluation_splits=[split],
-        generation_size=1024,
+        generation_size=GENERATION_SIZE,
         stop_sequence=[],
         version="0.1",
     )
@@ -610,23 +525,7 @@ multilingual_advbench_tasks = [
         metrics=[llm_judge_safety],
         hf_avail_splits=["train"],
         evaluation_splits=["train"],
-        generation_size=1024,
-        stop_sequence=[],
-        version="0.1",
-    )
-    for lang in MULTILINGUAL_ADVBENCH_LANGUAGES
-]
-
-multilingual_advbench_noeval_tasks = [
-    LightevalTaskConfig(
-        name=f"advbench_noeval_{lang}",
-        prompt_function=unescape_prompt,
-        hf_repo="simonycl/multilingual_advbench",
-        hf_subset=lang,
-        metrics=[dummy_metric],
-        hf_avail_splits=["train"],
-        evaluation_splits=["train"],
-        generation_size=1024,
+        generation_size=GENERATION_SIZE,
         stop_sequence=[],
         version="0.1",
     )
@@ -685,44 +584,60 @@ polyguard_tasks = [
         metrics=[llm_judge_safety],
         hf_avail_splits=["test"],
         evaluation_splits=["test"],
-        generation_size=1024,
+        generation_size=GENERATION_SIZE,
         stop_sequence=[],
         version="0.1",
     )
     for code, language_name in POLYGUARD_LANGUAGES.items()
 ]
 
-polyguard_noeval_tasks = [
-    LightevalTaskConfig(
-        name=f"polyguard_noeval_{code}",
-        prompt_function=regular_prompt,
-        hf_repo="ToxicityPrompts/PolyGuardPrompts",
-        hf_subset="default",
-        hf_filter=_polyguard_filter(language_name),
-        metrics=[dummy_metric],
-        hf_avail_splits=["test"],
-        evaluation_splits=["test"],
-        generation_size=1024,
-        stop_sequence=[],
-        version="0.1",
+
+# ---------------------------------------------------------------------------
+# WildJailbreak (https://huggingface.co/datasets/allenai/wildjailbreak)
+# ---------------------------------------------------------------------------
+# Adversarial jailbreak prompts from Jiang et al. (2024), "WildTeaming at Scale".
+# We use the `eval` subset (single `train` split, 2210 rows) and keep only the
+# *adversarial harmful* prompts (data_type == "adversarial_harmful", 2000 rows),
+# dropping the "adversarial_benign" ones that a model should comply with. The
+# prompt text lives in the `adversarial` column. The Llama Guard judge (reused
+# via llm_judge_safety) measures how often the model refuses.
+
+
+def wildjailbreak_prompt(line, task_name: str = None):
+    return Doc(
+        task_name=task_name,
+        query=line["adversarial"],
+        choices=None,
+        gold_index=None,
     )
-    for code, language_name in POLYGUARD_LANGUAGES.items()
-]
+
+
+def _wildjailbreak_harmful_filter(row):
+    return row["data_type"] == "adversarial_harmful"
+
+
+wildjailbreak_task = LightevalTaskConfig(
+    name="wildjailbreak",
+    prompt_function=wildjailbreak_prompt,
+    hf_repo="allenai/wildjailbreak",
+    hf_subset="eval",
+    hf_filter=_wildjailbreak_harmful_filter,
+    metrics=[llm_judge_safety],
+    hf_avail_splits=["train"],
+    evaluation_splits=["train"],
+    generation_size=GENERATION_SIZE,
+    stop_sequence=[],
+    version="0.1",
+)
 
 
 TASKS_TABLE = [
     advbench_task,
-    advbench_noeval_task,
     *hexphi_tasks,
-    *hexphi_noeval_tasks,
     *harmbench_standard_tasks,
-    *harmbench_standard_noeval_tasks,
     *harmbench_contextual_tasks,
-    *harmbench_contextual_noeval_tasks,
     *aya_red_teaming_tasks,
-    *aya_red_teaming_noeval_tasks,
     *multilingual_advbench_tasks,
-    *multilingual_advbench_noeval_tasks,
     *polyguard_tasks,
-    *polyguard_noeval_tasks,
+    wildjailbreak_task,
 ]
