@@ -2,6 +2,10 @@ from lighteval.tasks.tasks.mix_eval.prompts import parse_options
 
 
 def flow_judge_for_freeform_template(question, options, answer, gold):
+    # For MixEval freeform, `options` is the full list of acceptable reference answers
+    # (gold is only the first one). Render them all so the judge does not penalize a
+    # response that matches a non-first reference.
+    refs_block = "\n".join(f"- {ref}" for ref in options)
     return [
         {
             "role": "user",
@@ -28,8 +32,10 @@ Below is the output of the task:
 # EVALUATION CRITERIA AND SCORING RUBRIC
 Here are the evaluation criteria and the rubric that you need to use for evaluating the task:
 <evaluation_criteria>
-How well the response answers the question, the reference answer is:
-{gold}
+How well does the response answer the question? The following reference answers are all \
+considered correct — the response should be judged correct if it semantically matches \
+any one of them (do not penalize a response just because it does not match the first one):
+{refs_block}
 </evaluation_criteria>
 
 <scoring_rubric>
@@ -135,6 +141,11 @@ Please accurately evaluate the task. Strictly adhere to the evaluation criteria 
 # Judge Prompts for Close-ended Free-form Parser############
 # gpt_judge_for_closeended_freeform = lambda question, options, answer, gold: [
 def gpt_judge_for_closeended_freeform(question, options, answer, gold):
+    # For MixEval freeform, `options` is the full list of acceptable reference answers
+    # (gold is only the first one). Format them in the `<answer N>` style used by this
+    # template's own in-context examples, so the judge applies the rule it was shown:
+    # "each one of the golden answers is considered correct".
+    refs_block = "; ".join(f"<answer {i + 1}> {ref}" for i, ref in enumerate(options))
     return [
         {"role": "system", "content": "In this task, I want you to act as a judge."},
         {
@@ -162,7 +173,7 @@ Your Judgment: The golden answers provide a detailed list of entities all relati
 Note that each one of the golden answers is considered correct. Thus if the model's answer matches any one of the golden answers, it should be considered correct. Judge the below case, give the brief reasoning process and the correctness score.
 
 Question: {question}
-Golden Answer(s): {gold}
+Golden Answer(s): {refs_block}
 Model's Answer: {answer}
 Your Judgment:
 """,

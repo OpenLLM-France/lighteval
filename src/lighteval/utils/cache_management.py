@@ -25,6 +25,7 @@ import hashlib
 import json
 import logging
 import os
+import re
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Callable, List, Set, Tuple, Union
@@ -178,6 +179,8 @@ class SampleCache:
             # Use deterministic ordering based on string repr
             config_strs = sorted([cfg.__str__(lite=True) for cfg in task_configs])
             config_str = "|".join(config_strs)
+            # Strip function memory addresses so the hash stays deterministic across runs.
+            config_str = re.sub(r"<function (\w+) at 0x[0-9a-fA-F]+>", r"<function \1>", config_str)
             task_hash = hashlib.sha256(config_str.encode()).hexdigest()[:16]
             self._task_hashes[full_task_name] = task_hash
         return self._task_hashes[full_task_name]
@@ -414,21 +417,30 @@ def cached(sampling_method: SamplingMethod = None):  # noqa C901
                 )
                 new_results = func(self, docs_not_cached, *args, **kwargs)
 
-                # Store new results in file cache
-                cache.cache_samples(
-                    docs=docs_not_cached,
-                    results=new_results,
-                    task_ids=task_ids,
-                    sampling_method=sampling_method,
-                )
+                # Store new results in file cache. Under a data-parallel launch (e.g. accelerate with
+                # several processes), every rank holds the full, gathered results, so only the main
+                # process writes the cache file. Letting every rank write the same parquet concurrently
+                # corrupts it and makes subsequent loads fail. Other ranks wait at the barrier below
+                # before reading. See https://github.com/huggingface/lighteval/issues/1102.
+                accelerator = getattr(self, "accelerator", None)
+                if accelerator is None or accelerator.is_main_process:
+                    cache.cache_samples(
+                        docs=docs_not_cached,
+                        results=new_results,
+                        task_ids=task_ids,
+                        sampling_method=sampling_method,
+                    )
+                if accelerator is not None:
+                    accelerator.wait_for_everyone()
 
             # 3) Create final results by pulling from newly saved file cache
             final_cached_results = cache.get_samples_from_cache(docs, task_ids, sampling_method)
 
-            # 4) We only keep samples with the correct sampling method
-            final_results = [
-                s for s in final_cached_results if cache.get_sampling_method(cache._dump_sample(s)) == sampling_method
-            ]
+            # 4) Cache files are already partitioned per sampling method, so the loaded
+            # samples are correct as-is. (get_sampling_method() infers the method from
+            # sample content and cannot tell PERPLEXITY from LOGPROBS, so re-filtering
+            # here would drop all PERPLEXITY samples.)
+            final_results = list(final_cached_results)
 
             if any(r is None for r in final_results):
                 raise ValueError("Problem while loading and aggregating items from cache.")

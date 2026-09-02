@@ -219,6 +219,8 @@ class StopWordPercentageChecker(Instruction):
         """Checks if the response contains the expected percentage of stop words."""
         num_words = instructions_util.count_words(value)
         num_stopwords = instructions_util.count_stopwords(value)
+        if num_words == 0:
+            return False
         stopword_percentage = (num_stopwords / num_words) * 100
         return stopword_percentage <= self._percentage
 
@@ -512,6 +514,8 @@ class AlphabetLoopChecker(Instruction):
         """Checks if each word of the response starts with the next letter of the alphabet."""
         value = value.translate(str.maketrans("", "", string.punctuation))
         words = value.strip("".join(string.punctuation) + " ").split()
+        if not words:
+            return False
         alphabet = string.ascii_lowercase
         correct_letter = words[0][0].lower()
         if correct_letter not in alphabet:  # numbers are fails
@@ -897,12 +901,16 @@ class EmojiSentenceChecker(Instruction):
         sentences = instructions_util.split_into_sentences(value)
         for i, sentence in enumerate(sentences):
             stripped = sentence.translate(str.maketrans("", "", string.punctuation)).strip()
+            if not len(stripped):
+                return False
             last_char = stripped[-1]
             # because blank spaces are treated oddly
             second_last_char = stripped[-2] if len(stripped) > 1 else stripped[-1]
             if not emoji.is_emoji(last_char) and not emoji.is_emoji(second_last_char):
                 if i < len(sentences) - 1:
                     stripped = sentences[i + 1].translate(str.maketrans("", "", string.punctuation)).strip()
+                    if not len(stripped):
+                        return False
                     first_char = stripped[0]
                     if not emoji.is_emoji(first_char):
                         return False
@@ -1218,6 +1226,9 @@ class LastWordFirstNextChecker(Instruction):
     def check_following(self, value):
         """Checks if the last word of each sentence in the response is the first word of the next sentence."""
         sentences = instructions_util.split_into_sentences(value)
+        sentences = [
+            s for s in sentences if s.strip("".join(string.punctuation) + " ").split()
+        ]  # Remove empty sentences
         for i in range(len(sentences) - 1):
             last_word = sentences[i].rstrip("".join(string.punctuation) + " ").split()[-1]
             first_word = sentences[i + 1].lstrip("".join(string.punctuation) + " ").split()[0]
@@ -1252,7 +1263,7 @@ class ParagraphLastFirstWordMatchChecker(Instruction):
             if not paragraph:
                 continue
             words = paragraph.strip("".join(string.punctuation) + " ").split()
-            if words[0] != words[-1]:
+            if not len(words) or words[0] != words[-1]:
                 return False
         return True
 

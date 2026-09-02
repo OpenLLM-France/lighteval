@@ -343,7 +343,9 @@ class MetricsLogger:
                     # The metric is in a subset which has already been computed and saved
                     continue
 
-                aggregation = task.aggregation()[metric_name]
+                aggregation = task.aggregation().get(metric_name)
+                if aggregation is None:
+                    continue
 
                 try:
                     metric_result = aggregation(metric_values)

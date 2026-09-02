@@ -132,6 +132,6 @@ def uses_chat_template(
         return tk.chat_template is not None
     except Exception:
         logger.warning(
-            "We were not able to detect if the chat template should be used for your model: {e}. Assuming we're using a chat template"
+            "We were not able to detect if the chat template should be used for your model: {e}. Assuming we're not using a chat template"
         )
-        return True
+        return False
