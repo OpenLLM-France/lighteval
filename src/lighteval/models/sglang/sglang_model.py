@@ -31,6 +31,13 @@ from tqdm import tqdm
 from lighteval.data import GenerativeTaskDataset, LoglikelihoodDataset
 from lighteval.models.abstract_model import LightevalModel, ModelConfig
 from lighteval.models.model_output import ModelResponse
+from lighteval.models.thinking import (
+    DEFAULT_THINKING_BUDGET,
+    THINK_END_TAG,
+    ThinkingGenSample,
+    resolve_is_thinking_model,
+    two_phase_generate,
+)
 from lighteval.models.utils import _simplify_name, uses_chat_template
 from lighteval.tasks.prompt_manager import PromptManager
 from lighteval.tasks.requests import Doc, SamplingMethod
@@ -165,6 +172,21 @@ class SGLangModel(LightevalModel):
             self.use_chat_template, self.tokenizer, config.system_prompt, enable_thinking=config.enable_thinking
         )
 
+        # Decide whether to use two-phase thinking generation, so the reasoning
+        # (<think>...</think>) and the answer are budgeted separately (see _greedy_until).
+        self.is_thinking_model = resolve_is_thinking_model(
+            self.tokenizer,
+            self.use_chat_template,
+            config.enable_thinking,
+            config.generation_parameters.thinking_budget is not None,
+        )
+        if self.is_thinking_model:
+            logger.info(
+                "Detected a thinking model: reasoning will be generated with a separate budget "
+                f"(thinking_budget={self.config.generation_parameters.thinking_budget or DEFAULT_THINKING_BUDGET}) "
+                "and generation_size will apply only to the answer after </think>."
+            )
+
         # Initialize cache for tokenization and predictions
         self._cache = SampleCache(config)
 
@@ -272,16 +294,25 @@ class SGLangModel(LightevalModel):
             inputs = tokenized["input_ids"]
             context_size = len(inputs[0])
 
+            # For thinking models, generation_size budgets only the answer (after </think>); the
+            # reasoning gets its own budget, and the context must leave room for both phases.
+            if self.is_thinking_model:
+                thinking_budget = self.config.generation_parameters.thinking_budget or DEFAULT_THINKING_BUDGET
+                truncation_budget = thinking_budget + (max_new_tokens or 0)
+            else:
+                thinking_budget = None
+                truncation_budget = max_new_tokens
+
             # left truncate the inputs to the maximum length
-            if max_new_tokens is not None:
-                if context_size + max_new_tokens > self.max_length:
+            if truncation_budget is not None:
+                if context_size + truncation_budget > self.max_length:
                     logger.warning(
-                        f"{context_size + max_new_tokens=} which is greater than {self.max_length=}. Truncating context to {self.max_length - max_new_tokens} tokens."
+                        f"{context_size + truncation_budget=} which is greater than {self.max_length=}. Truncating context to {self.max_length - truncation_budget} tokens."
                     )
-                    context_size = self.max_length - max_new_tokens
+                    context_size = self.max_length - truncation_budget
                     if context_size < 0:
                         logger.critical(
-                            f"{context_size=} is less than 0, either reduce the max_new_tokens or increase model max length."
+                            f"{context_size=} is less than 0, either reduce the max_new_tokens/thinking_budget or increase model max length."
                         )
                         raise ValueError("Context size is less than 0.")
                     inputs = [input[-context_size:] for input in inputs]
@@ -292,6 +323,20 @@ class SGLangModel(LightevalModel):
                     )
                     context_size = self.max_length
                     inputs = [input[-context_size:] for input in inputs]
+
+            if self.is_thinking_model:
+                results.extend(
+                    two_phase_generate(
+                        inputs=inputs,
+                        context=contexts,
+                        thinking_budget=thinking_budget,
+                        answer_budget=max_new_tokens,
+                        num_samples=num_samples,
+                        generate_fn=self._thinking_generate_fn,
+                        close_tag_ids=self.tokenizer.encode(THINK_END_TAG, add_special_tokens=False),
+                    )
+                )
+                continue
 
             sglang_outputs = self._generate(
                 inputs=inputs,
@@ -314,6 +359,32 @@ class SGLangModel(LightevalModel):
                 )
                 results.append(cur_response)
         return dataset.get_original_order(results)
+
+    def _thinking_generate_fn(
+        self,
+        inputs: list[list[int]],
+        max_new_tokens: Optional[int],
+        stop_tokens: list[str],
+        num_samples: int,
+    ) -> list[list[ThinkingGenSample]]:
+        """Backend primitive for two_phase_generate (see lighteval.models.thinking).
+
+        SGLang excludes the stop string from the returned text; we re-encode that text to get
+        token ids that are consistent with it and likewise free of the </think> stop, as the
+        two_phase_generate contract requires. One sample per prompt (matching _greedy_until).
+        """
+        outputs = self._generate(
+            inputs=inputs,
+            max_new_tokens=max_new_tokens,
+            stop_tokens=stop_tokens,
+            num_samples=num_samples,
+        )
+        result = []
+        for output in outputs:
+            text = output["text"]
+            token_ids = self.tokenizer.encode(text, add_special_tokens=False)
+            result.append([ThinkingGenSample(text=text, token_ids=token_ids)])
+        return result
 
     @requires("sglang")
     def _generate(

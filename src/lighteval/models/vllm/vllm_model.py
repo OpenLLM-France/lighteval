@@ -36,6 +36,13 @@ from tqdm import tqdm
 from lighteval.data import GenerativeTaskDataset, LoglikelihoodDataset
 from lighteval.models.abstract_model import LightevalModel, ModelConfig
 from lighteval.models.model_output import ModelResponse
+from lighteval.models.thinking import (
+    DEFAULT_THINKING_BUDGET,
+    THINK_END_TAG,
+    ThinkingGenSample,
+    resolve_is_thinking_model,
+    two_phase_generate,
+)
 from lighteval.models.utils import _simplify_name, uses_chat_template
 from lighteval.tasks.prompt_manager import PromptManager
 from lighteval.tasks.requests import Doc, SamplingMethod
@@ -245,6 +252,21 @@ class VLLMModel(LightevalModel):
             self.use_chat_template, self.tokenizer, config.system_prompt, enable_thinking=config.enable_thinking
         )
 
+        # Decide whether to use two-phase thinking generation, so the reasoning
+        # (<think>...</think>) and the answer are budgeted separately (see _greedy_until).
+        self.is_thinking_model = resolve_is_thinking_model(
+            self.tokenizer,
+            self.use_chat_template,
+            config.enable_thinking,
+            config.generation_parameters.thinking_budget is not None,
+        )
+        if self.is_thinking_model:
+            logger.info(
+                "Detected a thinking model: reasoning will be generated with a separate budget "
+                f"(thinking_budget={self.config.generation_parameters.thinking_budget or DEFAULT_THINKING_BUDGET}) "
+                "and max_new_tokens/generation_size will apply only to the answer after </think>."
+            )
+
         # Initialize cache for tokenization and predictions
         self._cache = SampleCache(config)
 
@@ -440,6 +462,43 @@ class VLLMModel(LightevalModel):
         """
         return self._greedy_until(docs)
 
+    def _truncate_context(self, inputs: list[list[int]], budget: Optional[int]) -> list[list[int]]:
+        """Left-truncate each context so that context + generation budget fits max_length.
+
+        We prefer not to truncate at all (the prompt/few-shot manager is expected to size the
+        context), so this only kicks in when the model would otherwise overflow. `budget` is the
+        number of tokens generation may add (answer budget, plus reasoning budget for thinking
+        models); when None, only the context itself is bounded.
+        """
+        context_size = len(inputs[0])
+        if self.max_length is None:
+            logger.warning(
+                "The model max_length was not set in the model arguments, so we cannot check if we need to truncate the context."
+            )
+            return inputs
+
+        if budget is not None:
+            if context_size + budget <= self.max_length:
+                return inputs
+            logger.warning(
+                f"{context_size + budget=} which is greater than {self.max_length=}. Truncating context to {self.max_length - budget} tokens."
+            )
+            context_size = self.max_length - budget
+            if context_size < 0:
+                logger.critical(
+                    f"{context_size=} is less than 0, either reduce the max_new_tokens/thinking_budget or increase model max length."
+                )
+                raise ValueError("Context size is less than 0.")
+        else:
+            if context_size <= self.max_length:
+                return inputs
+            logger.warning(
+                f"{context_size=} which is greater than {self.max_length=}. Truncating context to {self.max_length} tokens."
+            )
+            context_size = self.max_length
+
+        return [input[-context_size:] for input in inputs]
+
     def _greedy_until(
         self,
         docs: list[Doc],
@@ -475,32 +534,31 @@ class VLLMModel(LightevalModel):
             # The choice we go for here is to avoid truncating the prompt if we can, since it
             # should have been managed by the prompt creator/few shot manager if requested by the user.
             inputs = tokenized["input_ids"]
-            context_size = len(inputs[0])
 
-            # left truncate the inputs to the maximum length
-            if self.max_length is None:
-                logger.warning(
-                    "The model max_length was not set in the model arguments, so we cannot check if we need to truncate the context."
-                )
-            elif max_new_tokens is not None:
-                if context_size + max_new_tokens > self.max_length:
-                    logger.warning(
-                        f"{context_size + max_new_tokens=} which is greater than {self.max_length=}. Truncating context to {self.max_length - max_new_tokens} tokens."
-                    )
-                    context_size = self.max_length - max_new_tokens
-                    if context_size < 0:
-                        logger.critical(
-                            f"{context_size=} is less than 0, either reduce the max_new_tokens or increase model max length."
-                        )
-                        raise ValueError("Context size is less than 0.")
-                    inputs = [input[-context_size:] for input in inputs]
+            # For thinking models, max_new_tokens budgets only the answer (after </think>); the
+            # reasoning gets its own budget, and the context must leave room for both phases.
+            if self.is_thinking_model:
+                thinking_budget = self.config.generation_parameters.thinking_budget or DEFAULT_THINKING_BUDGET
+                truncation_budget = thinking_budget + (max_new_tokens or 0)
             else:
-                if context_size > self.max_length:
-                    logger.warning(
-                        f"{context_size=} which is greater than {self.max_length=}. Truncating context to {self.max_length} tokens."
+                thinking_budget = None
+                truncation_budget = max_new_tokens
+
+            inputs = self._truncate_context(inputs, truncation_budget)
+
+            if self.is_thinking_model:
+                results.extend(
+                    two_phase_generate(
+                        inputs=inputs,
+                        context=context,
+                        thinking_budget=thinking_budget,
+                        answer_budget=max_new_tokens,
+                        num_samples=num_samples,
+                        generate_fn=self._thinking_generate_fn,
+                        close_tag_ids=self.tokenizer.encode(THINK_END_TAG, add_special_tokens=False),
                     )
-                    context_size = self.max_length
-                    inputs = [input[-context_size:] for input in inputs]
+                )
+                continue
 
             vllm_outputs = self._generate(
                 inputs=inputs,
@@ -524,6 +582,30 @@ class VLLMModel(LightevalModel):
                 results.append(cur_response)
 
         return dataset.get_original_order(results)
+
+    def _thinking_generate_fn(
+        self,
+        inputs: list[list[int]],
+        max_new_tokens: Optional[int],
+        stop_tokens: list[str],
+        num_samples: int,
+    ) -> list[list[ThinkingGenSample]]:
+        """Backend primitive for two_phase_generate (see lighteval.models.thinking).
+
+        vLLM already strips the stop string from both the text and the token ids, so the samples
+        it returns satisfy the "exclude the stop sequence" contract without extra work.
+        """
+        outputs = self._generate(
+            inputs=inputs,
+            max_new_tokens=max_new_tokens,
+            stop_tokens=stop_tokens,
+            returns_logits=False,
+            num_samples=num_samples,
+        )
+        return [
+            [ThinkingGenSample(text=sample.text, token_ids=list(sample.token_ids)) for sample in out.outputs]
+            for out in outputs
+        ]
 
     def _generate(
         self,

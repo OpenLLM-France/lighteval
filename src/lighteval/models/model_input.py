@@ -37,6 +37,11 @@ class GenerationParameters(BaseModel, extra="forbid"):
     max_new_tokens: NonNegativeInt | None = None  # vllm, transformers, tgi, litellm, sglang
     min_new_tokens: NonNegativeInt | None = None  # vllm, transformers, sglang
 
+    # For thinking models only: max tokens allowed for the reasoning phase (between <think> and
+    # </think>). When set, max_new_tokens counts *only* the answer emitted after </think>, so the
+    # reasoning does not eat into the answer budget. See lighteval.models.thinking.two_phase_generate.
+    thinking_budget: NonNegativeInt | None = None  # vllm, transformers, sglang
+
     seed: NonNegativeInt | None = None  # vllm, tgi, litellm
     stop_tokens: list[str] | None = None  # vllm, transformers, tgi, litellm, sglang
     temperature: NonNegativeFloat = (
@@ -155,9 +160,16 @@ class GenerationParameters(BaseModel, extra="forbid"):
             "stop_tokens": "stop",
         }
 
+        # thinking_budget drives two-phase generation; it is not a sampling field, so exclude it here.
+        excluded = {"thinking_budget"}
+
         # Task specific sampling params to set in model: n, best_of, use_beam_search
         # Generation specific params to set in model: logprobs, prompt_logprobs
-        x = {sampling_params_to_vllm_naming.get(k, k): v for k, v in self.model_dump().items() if v is not None}
+        x = {
+            sampling_params_to_vllm_naming.get(k, k): v
+            for k, v in self.model_dump().items()
+            if v is not None and k not in excluded
+        }
         # VLLM max_tokens is 16 by default, however the pipeline expect the max_tokens to be None, if the user didn't specify it
         if not x.get("max_tokens"):
             x["max_tokens"] = None
@@ -172,7 +184,8 @@ class GenerationParameters(BaseModel, extra="forbid"):
         """
         # Task specific sampling params to set in model: n, best_of, use_beam_search
         # Generation specific params to set in model: logprobs, prompt_logprobs
-        return {k: v for k, v in self.model_dump().items() if v is not None}
+        # thinking_budget drives two-phase generation; it is not a sampling field, so exclude it here.
+        return {k: v for k, v in self.model_dump().items() if v is not None and k != "thinking_budget"}
 
     def to_transformers_dict(self) -> dict:
         """Selects relevant generation and sampling parameters for transformers models.
