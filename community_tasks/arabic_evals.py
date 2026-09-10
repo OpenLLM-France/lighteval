@@ -31,10 +31,14 @@ import random
 import re
 from typing import Any, Dict, List, Optional, Union
 
+import numpy as np
+
 from lighteval.metrics.metrics import Metrics
+from lighteval.metrics.metrics_sample import SampleLevelComputation
 from lighteval.metrics.normalizations import LogProbCharNorm
 from lighteval.metrics.utils.llm_as_judge import JudgeLM
-from lighteval.metrics.utils.metric_utils import Metric
+from lighteval.metrics.utils.metric_utils import SampleLevelMetric
+from lighteval.models.model_output import ModelResponse
 from lighteval.tasks.default_prompts import LETTER_INDICES
 from lighteval.tasks.lighteval_task import LightevalTaskConfig
 from lighteval.tasks.requests import Doc, SamplingMethod
@@ -819,8 +823,13 @@ MADINAH_QA_TASKS = [
 ]
 
 
-class JudgeMetricWrapper(Metric):
-    """Wrapper class for LLM-based judge metric implementation."""
+class JudgeMetricWrapper(SampleLevelComputation):
+    """Sample-level LLM-as-judge scoring, one judged score per generated answer.
+
+    Implements the current metric API: `compute` is called once per sample with the model's
+    `ModelResponse` and the `Doc`, and returns a single float score. It is wired into a
+    `SampleLevelMetric` (see `wrapped_judge` below) whose corpus function averages the scores.
+    """
 
     def __init__(self, judge: JudgeLM):
         """
@@ -830,40 +839,25 @@ class JudgeMetricWrapper(Metric):
             judge (JudgeLM): The LLM judge instance to use for evaluation.
         """
         self.judge = judge
-        self.metric_name = "llm_as_judge"
-        self.category = SamplingMethod.GENERATIVE
-        self.corpus_level_fn = self.aggregate_scores
-        self.sample_level_fn = self._sample_level_fn
-        self.higher_is_better = True  # Fixed tuple syntax
 
-    def compute(self, responses: list[str], formatted_docs: list[Doc], **kwargs) -> dict[str, float]:
+    def compute(self, model_response: ModelResponse, doc: Doc, **kwargs) -> float:
         """
-        Computes evaluation scores using the judge's evaluate_answer method.
+        Scores a single answer with the judge's evaluate_answer method.
 
         Args:
-            responses (list[str]): The predicted answers
-            formatted_docs (list[Doc]): Documents containing questions and gold answers
-            kwargs: Additional keyword arguments (not used)
+            model_response (ModelResponse): The model's generation(s) for this sample.
+            doc (Doc): Document containing the question and the gold answer.
+            kwargs: Additional keyword arguments (not used).
 
         Returns:
-            dict[str, float]: Dictionary containing evaluation scores
+            float: The judge score for this sample.
         """
-        results = []
-        for i, doc in enumerate(formatted_docs):
-            question = doc.query
-            gold = doc.choices[doc.gold_index] if doc.gold_index is not None else None
-            answer = responses[i][0].result[0]
+        question = doc.query
+        gold = doc.choices[doc.gold_index] if doc.gold_index is not None else None
+        answer = model_response.text[0]
 
-            score, _, _ = self.judge.evaluate_answer(question=question, answer=answer, options=None, gold=gold)
-            results.append({self.metric_name: score})
-
-        return results
-
-    def aggregate_scores(self, scores: list[dict]) -> float:
-        return sum(scores) / len(scores) if scores else 0.0
-
-    def _sample_level_fn(self):
-        return None
+        score, _, _ = self.judge.evaluate_answer(question=question, answer=answer, options=None, gold=gold)
+        return score
 
 
 def parse_candidates(candidates: Union[List[str], str]) -> List[str]:
@@ -1004,13 +998,19 @@ def process_judge_response(response) -> float:
 
 
 judge = JudgeLM(
-    model="Qwen/Qwen2.5-72B-Instruct",
+    model="Qwen/Qwen2.5-72B-Instruct-AWQ",
     templates=judge_template,
     process_judge_response=process_judge_response,
     judge_backend="vllm",
 )
 
-wrapped_judge = JudgeMetricWrapper(judge)
+wrapped_judge = SampleLevelMetric(
+    metric_name="llm_as_judge",
+    higher_is_better=True,
+    category=SamplingMethod.GENERATIVE,
+    sample_level_fn=JudgeMetricWrapper(judge),
+    corpus_level_fn=np.mean,
+)
 
 # Task configuration
 alrage_qa_task = LightevalTaskConfig(
@@ -1027,6 +1027,909 @@ alrage_qa_task = LightevalTaskConfig(
     version=0,
 )
 
+# ==========================================================================================
+# Cloze-form (CF) variants
+# ------------------------------------------------------------------------------------------
+# The tasks above score the answer *label* (the Arabic letter أ/ب/... or the digit 0/1/...)
+# as the continuation. Some checkpoints have a strong prior over label tokens (e.g. rarely
+# emitting the first option), which confounds the measurement. The CF variants below instead
+# score the answer *text* itself and do not present the enumerated options in the prompt
+# (lighteval's "CF" / cloze formulation). Length differences between answer texts are handled
+# by the character-length normalization (LogProbCharNorm) already used by the metric.
+# ==========================================================================================
+
+
+def _cf_choices(raw_choices):
+    """Normalize CF answer options to non-empty strings.
+
+    CF scores the answer *text*, and the metric divides each log-prob by the choice's
+    character length (LogProbCharNorm), so an empty option would divide by zero. A few source
+    rows have a blank/malformed option (e.g. AraTrust Privacy has one row whose option A is
+    ""). We cast every option to str and replace any empty/whitespace-only one with a single
+    space, so length is always >= 1 while the choice count and gold-index alignment stay
+    identical to the label-based task.
+    """
+    out = []
+    for c in raw_choices:
+        s = "" if c is None else str(c)
+        out.append(s if s.strip() else " ")
+    return out
+
+
+def arabic_mmlu_cf_pfn(line, task_name: str = None):
+    instruction = "أجب عن السؤال التالي:\n\n"
+
+    # Keep only the non-null options, tracking their Latin key to locate the gold answer.
+    choices = []
+    valid_keys_latin = []
+    for idx, key in enumerate(["A", "B", "C", "D", "E"]):
+        option = line.get(f"Option {idx + 1}")
+        if option:  # same non-null filter as the letter-based task
+            choices.append(str(option))  # some options are numeric; scoring needs strings
+            valid_keys_latin.append(key)
+
+    answer_index = valid_keys_latin.index(line["Answer Key"])
+
+    query = f"{instruction}{line['Question']}\nالإجابة:"
+
+    return Doc(
+        task_name=task_name,
+        query=query,
+        choices=choices,
+        gold_index=answer_index,
+        instruction=instruction,
+    )
+
+
+class CustomArabicMMLUCFTask(LightevalTaskConfig):
+    def __init__(self, name, hf_subset):
+        super().__init__(
+            name=name,
+            hf_subset=hf_subset,
+            prompt_function=arabic_mmlu_cf_pfn,
+            hf_repo="MBZUAI/ArabicMMLU",
+            metrics=[Metrics.loglikelihood_acc(sample_params={"logprob_normalization": LogProbCharNorm()})],
+            hf_avail_splits=["test"],
+            evaluation_splits=["test"],
+            few_shots_split=["dev"],
+            few_shots_select="sequential",
+            suite=["community"],
+            generation_size=-1,
+            stop_sequence=None,
+            version=0,
+        )
+
+
+ARABIC_MMLU_CF_TASKS = [
+    CustomArabicMMLUCFTask(name=f"arabic_mmlu_cf:{subset}", hf_subset=subset) for subset in ARABIC_MMLU_SUBSETS
+]
+
+
+def arabic_mmlu_ht_cf_pfn(line, task_name: str = None):
+    instruction = "أجب عن السؤال التالي:\n\n"
+    choices = _cf_choices(line["choices"])  # some choices are numeric/blank; make them safe strings
+    answer_index = line["answer"]  # int index into line["choices"]
+
+    query = f"{instruction}{line['question']}\nالإجابة:"
+
+    return Doc(
+        task_name=task_name,
+        query=query,
+        choices=choices,
+        gold_index=answer_index,
+        instruction=instruction,
+    )
+
+
+class CustomArabicMMLUHTCFTask(LightevalTaskConfig):
+    def __init__(self, name, hf_subset):
+        super().__init__(
+            name=name,
+            hf_subset=hf_subset,
+            prompt_function=arabic_mmlu_ht_cf_pfn,
+            hf_repo="MBZUAI/human_translated_arabic_mmlu",
+            metrics=[Metrics.loglikelihood_acc(sample_params={"logprob_normalization": LogProbCharNorm()})],
+            hf_avail_splits=["test"],
+            evaluation_splits=["test"],
+            few_shots_split=None,
+            few_shots_select=None,
+            suite=["community"],
+            generation_size=-1,
+            stop_sequence=None,
+            version=0,
+        )
+
+
+ARABIC_MMLU_HT_CF_TASKS = [
+    CustomArabicMMLUHTCFTask(name=f"arabic_mmlu_ht_cf:{subset}", hf_subset=subset) for subset in ARABIC_MMLU_HT_SUBSETS
+]
+
+
+def aratrust_cf_pfn(line, task_name: str = None):
+    instruction = "أجب عن السؤال التالي:\n\n"
+    choices = _cf_choices([line["A"], line["B"], line["C"]])  # some options are numeric/blank
+    # line["Answer"] is an Arabic letter (أ/ب/ج) -> index into the choices above.
+    answer_index = LETTER_INDICES_AR.index(line["Answer"])
+
+    query = f"{instruction}{line['Question']}\nالإجابة:"
+
+    return Doc(
+        task_name=task_name,
+        query=query,
+        choices=choices,
+        gold_index=answer_index,
+        instruction=instruction,
+    )
+
+
+class CustomAraTrustCFTask(LightevalTaskConfig):
+    def __init__(self, name, hf_subset):
+        super().__init__(
+            name=name,
+            hf_subset=hf_subset,
+            prompt_function=aratrust_cf_pfn,
+            hf_repo="asas-ai/AraTrust-categorized",
+            metrics=[Metrics.loglikelihood_acc(sample_params={"logprob_normalization": LogProbCharNorm()})],
+            hf_avail_splits=["train"],
+            evaluation_splits=["train"],
+            few_shots_split=None,
+            few_shots_select=None,
+            suite=["community"],
+            generation_size=-1,
+            stop_sequence=None,
+            version=0,
+        )
+
+
+ARATRUST_CF_TASKS = [
+    CustomAraTrustCFTask(name=f"aratrust_cf:{subset}", hf_subset=subset) for subset in ARATRUST_SUBSETS
+]
+
+
+def arabic_exams_cf_pfn(line, task_name: str = None):
+    topic = line["subject"]
+    question = line["question"]
+    choices = _cf_choices([line["A"], line["B"], line["C"], line["D"]])  # some options are numeric/blank
+    answer_index = LETTER_INDICES.index(line["answer"])
+
+    instruction = f"أجب عن السؤال التالي حول {topic.replace('_', ' ')}. \n\n"
+    query = f"{instruction}السؤال: {question}\nالإجابة:"
+
+    return Doc(
+        task_name=task_name,
+        query=query,
+        choices=choices,
+        gold_index=answer_index,
+        instruction=instruction,
+    )
+
+
+arabic_exams_cf_task = LightevalTaskConfig(
+    name="arabic_exams_cf",
+    prompt_function=arabic_exams_cf_pfn,
+    suite=["community"],
+    hf_repo="OALL/Arabic_EXAMS",
+    hf_subset="default",
+    hf_avail_splits=["test", "validation"],
+    evaluation_splits=["test"],
+    few_shots_split="validation",
+    few_shots_select="sequential",
+    metrics=[Metrics.loglikelihood_acc(sample_params={"logprob_normalization": LogProbCharNorm()})],
+    version=0,
+)
+
+
+def alghafa_cf_pfn(line, task_name: str = None):
+    text = line["query"]
+    answer_index = int(line["label"])
+    allowed_keys = [f"sol{i}" for i in range(1, 6)]
+    # same key filter as the label-based task; some sol* values are numeric/blank so normalize
+    choices = _cf_choices([line[key] for key in allowed_keys if key in line])
+
+    # For the sentiment/rating subsets, `query` is a bare sentence (a tweet/review) and the task
+    # (classification) was conveyed ONLY by the enumerated options, which CF hides. So a generic
+    # "answer the question" prompt gives the model no cue. State the classification task instead;
+    # the self-describing choices ("هي جملة سلبية" / "هو رأي سلبي") then complete it naturally.
+    # Other subsets carry a real question/instruction in `query`, so keep the question framing.
+    if task_name is not None and "sentiment" in task_name:
+        instruction = "صنّف النص التالي:\n\n"
+        query = f"{instruction}النص: {text}\nالإجابة:"
+    else:
+        instruction = "أجب عن السؤال التالي\n\n"
+        query = f"{instruction}السؤال: {text}\nالإجابة:"
+
+    return Doc(
+        task_name=task_name,
+        query=query,
+        choices=choices,
+        gold_index=answer_index,
+        instruction=instruction,
+    )
+
+
+class CustomAlGhafaNativeCFTask(LightevalTaskConfig):
+    def __init__(self, name, hf_subset):
+        super().__init__(
+            name=name,
+            hf_subset=hf_subset,
+            prompt_function=alghafa_cf_pfn,
+            hf_repo="OALL/AlGhafa-Arabic-LLM-Benchmark-Native",
+            metrics=[Metrics.loglikelihood_acc(sample_params={"logprob_normalization": LogProbCharNorm()})],
+            hf_avail_splits=["test", "validation"],
+            evaluation_splits=["test"],
+            few_shots_split="validation",
+            few_shots_select="sequential",
+            suite=["community"],
+            generation_size=-1,
+            stop_sequence=None,
+            version=0,
+        )
+
+
+ALGHAFA_CF_TASKS = [
+    CustomAlGhafaNativeCFTask(name=f"alghafa_cf:{subset}", hf_subset=subset) for subset in ALGHAFA_SUBSETS
+]
+
+
+def madinah_qa_cf_pfn(line, task_name: str = None):
+    instruction = "بناءً على السياق أدناه، أجب عن السؤال التالي:\n\n"
+
+    choices = []
+    valid_keys_latin = []
+    for idx, key in enumerate(["A", "B", "C", "D", "E"]):
+        option = line.get(f"Option {idx + 1}")
+        if option:  # same non-null filter as the letter-based task
+            choices.append(str(option))  # some options are numeric; scoring needs strings
+            valid_keys_latin.append(key)
+
+    answer_index = valid_keys_latin.index(line["Answer Key"])
+
+    query = f"{instruction}\nالسياق:\n{line['Context']}\nالسؤال:\n{line['Question']}\nالإجابة:"
+
+    return Doc(
+        task_name=task_name,
+        query=query,
+        choices=choices,
+        gold_index=answer_index,
+        instruction=instruction,
+    )
+
+
+class CustomMadinahQACFTask(LightevalTaskConfig):
+    def __init__(self, name, hf_subset):
+        super().__init__(
+            name=name,
+            hf_subset=hf_subset,
+            prompt_function=madinah_qa_cf_pfn,
+            hf_repo="MBZUAI/MadinahQA",
+            metrics=[Metrics.loglikelihood_acc(sample_params={"logprob_normalization": LogProbCharNorm()})],
+            hf_avail_splits=["test"],
+            evaluation_splits=["test"],
+            few_shots_split=["dev"],
+            few_shots_select="sequential",
+            suite=["community"],
+            generation_size=-1,
+            stop_sequence=None,
+            version=0,
+        )
+
+
+MADINAH_QA_CF_TASKS = [
+    CustomMadinahQACFTask(name=f"madinah_qa_cf:{subset}", hf_subset=subset) for subset in MADINAH_QA_SUBSETS
+]
+
+
+# ==========================================================================================
+# Hybrid formulation (HYBRID) variants
+# ------------------------------------------------------------------------------------------
+# Hybrid = show the enumerated options in the prompt (so the task is framed exactly like the
+# original label-based task) BUT score the answer *text* as the continuation (like CF). This
+# keeps the task well-posed while avoiding the label-token prior that distorts the label
+# formulation. Each function reuses its original prompt verbatim and only returns the answer
+# texts as `choices` instead of the letter/digit labels. Character-length normalization
+# (LogProbCharNorm) handles differing answer lengths, as for CF.
+# ==========================================================================================
+
+
+def arabic_mmlu_hybrid_pfn(line, task_name: str = None):
+    instruction = "السؤال التالي هو سؤال متعدد الإختيارات. اختر الإجابة الصحيحة:\n\n"
+    latin_to_arabic = {"A": "أ", "B": "ب", "C": "ج", "D": "د", "E": "هـ"}
+
+    choices = []
+    valid_keys_latin = []
+    valid_keys_arabic = []
+    for idx, key in enumerate(["A", "B", "C", "D", "E"]):
+        option = line.get(f"Option {idx + 1}")
+        if option:
+            choices.append(str(option))
+            valid_keys_latin.append(key)
+            valid_keys_arabic.append(latin_to_arabic[key])
+
+    answer_index = valid_keys_latin.index(line["Answer Key"])
+
+    query = f"{instruction}{line['Question']}\n"
+    query += "".join([f"{key}. {choice}\n" for key, choice in zip(valid_keys_arabic, choices)])
+    query += "الإجابة:"
+
+    return Doc(
+        task_name=task_name,
+        query=query,
+        choices=_cf_choices(choices),  # score the answer text, not the Arabic letter
+        gold_index=answer_index,
+        instruction=instruction,
+    )
+
+
+class CustomArabicMMLUHybridTask(LightevalTaskConfig):
+    def __init__(self, name, hf_subset):
+        super().__init__(
+            name=name,
+            hf_subset=hf_subset,
+            prompt_function=arabic_mmlu_hybrid_pfn,
+            hf_repo="MBZUAI/ArabicMMLU",
+            metrics=[Metrics.loglikelihood_acc(sample_params={"logprob_normalization": LogProbCharNorm()})],
+            hf_avail_splits=["test"],
+            evaluation_splits=["test"],
+            few_shots_split=["dev"],
+            few_shots_select="sequential",
+            suite=["community"],
+            generation_size=-1,
+            stop_sequence=None,
+            version=0,
+        )
+
+
+ARABIC_MMLU_HYBRID_TASKS = [
+    CustomArabicMMLUHybridTask(name=f"arabic_mmlu_hybrid:{subset}", hf_subset=subset) for subset in ARABIC_MMLU_SUBSETS
+]
+
+
+def arabic_mmlu_ht_hybrid_pfn(line, task_name: str = None):
+    instruction = "السؤال التالي هو سؤال متعدد الإختيارات. اختر الإجابة الصحيحة:\n\n"
+    choices = [str(c) for c in line["choices"]]
+    answer_index = line["answer"]
+
+    query = f"{instruction}{line['question']}\n"
+    query += "".join([f"{idx}. {choice}\n" for idx, choice in enumerate(choices, start=1)])
+    query += "الإجابة:"
+
+    return Doc(
+        task_name=task_name,
+        query=query,
+        choices=_cf_choices(choices),  # score the answer text, not the digit label
+        gold_index=answer_index,
+        instruction=instruction,
+    )
+
+
+class CustomArabicMMLUHTHybridTask(LightevalTaskConfig):
+    def __init__(self, name, hf_subset):
+        super().__init__(
+            name=name,
+            hf_subset=hf_subset,
+            prompt_function=arabic_mmlu_ht_hybrid_pfn,
+            hf_repo="MBZUAI/human_translated_arabic_mmlu",
+            metrics=[Metrics.loglikelihood_acc(sample_params={"logprob_normalization": LogProbCharNorm()})],
+            hf_avail_splits=["test"],
+            evaluation_splits=["test"],
+            few_shots_split=None,
+            few_shots_select=None,
+            suite=["community"],
+            generation_size=-1,
+            stop_sequence=None,
+            version=0,
+        )
+
+
+ARABIC_MMLU_HT_HYBRID_TASKS = [
+    CustomArabicMMLUHTHybridTask(name=f"arabic_mmlu_ht_hybrid:{subset}", hf_subset=subset)
+    for subset in ARABIC_MMLU_HT_SUBSETS
+]
+
+
+def aratrust_hybrid_pfn(line, task_name: str = None):
+    instruction = "السؤال التالي هو سؤال متعدد الإختيارات. اختر الإجابة الصحيحة: أ، ب أو ج. \n\n"
+    choices = [str(line["A"]), str(line["B"]), str(line["C"])]
+    answer_index = LETTER_INDICES_AR.index(line["Answer"])
+
+    query = f"{instruction}{line['Question']}\n"
+    query += "".join([f"{choice}\n" for choice in choices])
+    query += "الإجابة:"
+
+    return Doc(
+        task_name=task_name,
+        query=query,
+        choices=_cf_choices(choices),  # score the answer text, not the Arabic letter
+        gold_index=answer_index,
+        instruction=instruction,
+    )
+
+
+class CustomAraTrustHybridTask(LightevalTaskConfig):
+    def __init__(self, name, hf_subset):
+        super().__init__(
+            name=name,
+            hf_subset=hf_subset,
+            prompt_function=aratrust_hybrid_pfn,
+            hf_repo="asas-ai/AraTrust-categorized",
+            metrics=[Metrics.loglikelihood_acc(sample_params={"logprob_normalization": LogProbCharNorm()})],
+            hf_avail_splits=["train"],
+            evaluation_splits=["train"],
+            few_shots_split=None,
+            few_shots_select=None,
+            suite=["community"],
+            generation_size=-1,
+            stop_sequence=None,
+            version=0,
+        )
+
+
+ARATRUST_HYBRID_TASKS = [
+    CustomAraTrustHybridTask(name=f"aratrust_hybrid:{subset}", hf_subset=subset) for subset in ARATRUST_SUBSETS
+]
+
+
+def arabic_exams_hybrid_pfn(line, task_name: str = None):
+    topic = line["subject"]
+    question = line["question"]
+    choices = [str(line["A"]), str(line["B"]), str(line["C"]), str(line["D"])]
+    choices_formatted = [f" {LETTER_INDICES_AR[i]}) {choice}\n" for i, choice in enumerate(choices)]
+    answer_index = LETTER_INDICES.index(line["answer"])
+
+    instruction = f"الأسئلة التالية هي أسئلة متعددة الإختيارات مع الجواب الصحيح حول {topic.replace('_', ' ')}. \n\n"
+    query = f"{instruction}السؤال: {question}\n"
+    query += "\n".join(choices_formatted)
+    query += "\nالإجابة:"
+
+    return Doc(
+        task_name=task_name,
+        query=query,
+        choices=_cf_choices(choices),  # score the answer text, not the Arabic letter
+        gold_index=answer_index,
+        instruction=instruction,
+    )
+
+
+arabic_exams_hybrid_task = LightevalTaskConfig(
+    name="arabic_exams_hybrid",
+    prompt_function=arabic_exams_hybrid_pfn,
+    suite=["community"],
+    hf_repo="OALL/Arabic_EXAMS",
+    hf_subset="default",
+    hf_avail_splits=["test", "validation"],
+    evaluation_splits=["test"],
+    few_shots_split="validation",
+    few_shots_select="sequential",
+    metrics=[Metrics.loglikelihood_acc(sample_params={"logprob_normalization": LogProbCharNorm()})],
+    version=0,
+)
+
+
+def alghafa_hybrid_pfn(line, task_name: str = None):
+    question = line["query"]
+    answer_index = int(line["label"])
+    allowed_keys = [f"sol{i}" for i in range(1, 6)]
+    extracted_choices = [str(line[key]) for key in allowed_keys if key in line]
+
+    instruction = "الأسئلة التالية هي أسئلة متعددة الإختيارات مع الجواب الصحيح\n\n"
+    query = f"{instruction}السؤال: {question}\n"
+    for index, choice in enumerate(extracted_choices):
+        query += f"{index}) {choice}\n"
+    query += "الإجابة:"
+
+    return Doc(
+        task_name=task_name,
+        query=query,
+        choices=_cf_choices(extracted_choices),  # score the answer text, not the digit label
+        gold_index=answer_index,
+        instruction=instruction,
+    )
+
+
+class CustomAlGhafaNativeHybridTask(LightevalTaskConfig):
+    def __init__(self, name, hf_subset):
+        super().__init__(
+            name=name,
+            hf_subset=hf_subset,
+            prompt_function=alghafa_hybrid_pfn,
+            hf_repo="OALL/AlGhafa-Arabic-LLM-Benchmark-Native",
+            metrics=[Metrics.loglikelihood_acc(sample_params={"logprob_normalization": LogProbCharNorm()})],
+            hf_avail_splits=["test", "validation"],
+            evaluation_splits=["test"],
+            few_shots_split="validation",
+            few_shots_select="sequential",
+            suite=["community"],
+            generation_size=-1,
+            stop_sequence=None,
+            version=0,
+        )
+
+
+ALGHAFA_HYBRID_TASKS = [
+    CustomAlGhafaNativeHybridTask(name=f"alghafa_hybrid:{subset}", hf_subset=subset) for subset in ALGHAFA_SUBSETS
+]
+
+
+def madinah_qa_hybrid_pfn(line, task_name: str = None):
+    instruction = "بناءً على السياق أدناه، اختر الإجابة الصحيحة للسؤال التالي من قائمة الأجوبة:\n\n"
+    latin_to_arabic = {"A": "أ", "B": "ب", "C": "ج", "D": "د", "E": "هـ"}
+
+    choices = []
+    valid_keys_latin = []
+    valid_keys_arabic = []
+    for idx, key in enumerate(["A", "B", "C", "D", "E"]):
+        option = line.get(f"Option {idx + 1}")
+        if option:
+            choices.append(str(option))
+            valid_keys_latin.append(key)
+            valid_keys_arabic.append(latin_to_arabic[key])
+
+    answer_index = valid_keys_latin.index(line["Answer Key"])
+
+    query = f"{instruction}\nالسياق:\n{line['Context']}\nالسؤال:\n{line['Question']}\n"
+    query += "".join([f"{key}. {choice}\n" for key, choice in zip(valid_keys_arabic, choices)])
+    query += "الإجابة:"
+
+    return Doc(
+        task_name=task_name,
+        query=query,
+        choices=_cf_choices(choices),  # score the answer text, not the Arabic letter
+        gold_index=answer_index,
+        instruction=instruction,
+    )
+
+
+class CustomMadinahQAHybridTask(LightevalTaskConfig):
+    def __init__(self, name, hf_subset):
+        super().__init__(
+            name=name,
+            hf_subset=hf_subset,
+            prompt_function=madinah_qa_hybrid_pfn,
+            hf_repo="MBZUAI/MadinahQA",
+            metrics=[Metrics.loglikelihood_acc(sample_params={"logprob_normalization": LogProbCharNorm()})],
+            hf_avail_splits=["test"],
+            evaluation_splits=["test"],
+            few_shots_split=["dev"],
+            few_shots_select="sequential",
+            suite=["community"],
+            generation_size=-1,
+            stop_sequence=None,
+            version=0,
+        )
+
+
+MADINAH_QA_HYBRID_TASKS = [
+    CustomMadinahQAHybridTask(name=f"madinah_qa_hybrid:{subset}", hf_subset=subset) for subset in MADINAH_QA_SUBSETS
+]
+
+
+# ==========================================================================================
+# Generative variant of arabic_mmlu (GEN)
+# ------------------------------------------------------------------------------------------
+# Instead of comparing choice log-probabilities, the model *generates* its answer and we parse
+# the chosen option out of the text. This is the fair way to probe an instruct model (which is
+# trained to produce answers, not to assign high log-prob to a bare option), and lets us tell a
+# real SFT knowledge regression apart from a log-likelihood measurement artifact by comparing
+# generative-instruct accuracy against the base model's log-prob accuracy.
+# ==========================================================================================
+
+
+def _norm_arabic_letter(letter: str) -> str:
+    """Canonicalize an Arabic answer letter (alef and ha variants) for robust comparison."""
+    s = (letter or "").strip()
+    for a in ("أ", "إ", "آ"):
+        s = s.replace(a, "ا")
+    s = s.replace("هـ", "ه")
+    return s
+
+
+def _extract_arabic_choice_letter(text: str, valid_letters):
+    """Pull the selected option letter out of a free-form generation.
+
+    Arabic single letters (أ، ب، و ...) also occur as ordinary words, so we do not scan for a
+    bare letter. We look, in priority order, for a letter that sits in an "answer position":
+    right after an answer marker (الإجابة/الجواب), inside brackets, at the start of a line, or
+    immediately before a ")"/"." option delimiter.
+    """
+    variants = set(valid_letters)
+    if any(v in ("أ", "إ", "آ", "ا") for v in valid_letters):
+        variants |= {"أ", "إ", "آ", "ا"}
+    if "هـ" in valid_letters:
+        variants |= {"ه", "هـ"}
+    alts = "|".join(sorted((re.escape(v) for v in variants), key=len, reverse=True))
+    # A standalone letter has no Arabic letter directly before or after it (so it is not just a
+    # character inside a word, e.g. the leading alef of "الإجابة" or the ب/ج inside "الجواب").
+    lead = r"(?<![ء-ي])"
+    trail = r"(?![ء-ي])"
+    patterns = [
+        rf"^\s*[\(\[]?\s*({alts}){trail}",  # generation starts with the letter (concise answers)
+        rf"(?:الإجابة|الجواب|الصحيحة|الخيار|حرف).{{0,15}}?{lead}({alts}){trail}",  # after a marker
+        rf"[\(\[]\s*({alts})\s*[\)\]]",  # bracketed anywhere
+        rf"(?:^|\n)\s*({alts})\s*(?:[\)\.\-:،]|$)",  # line-start letter + delimiter/end
+        rf"{lead}({alts})\s*[\)\.]",  # letter immediately before ) or .
+    ]
+    for pat in patterns:
+        m = re.search(pat, text)
+        if m:
+            return m.group(1)
+    return None
+
+
+class ArabicMCQGenerative(SampleLevelComputation):
+    """Score a generated MCQ answer: 1.0 if the parsed choice equals the gold, else 0.0.
+
+    Primary signal is the option letter; as a fallback, if exactly one option's text appears
+    verbatim in the generation, that option is taken. An unparseable generation scores 0.0.
+    """
+
+    def compute(self, model_response, doc, **kwargs) -> float:
+        gen = model_response.text[0] if getattr(model_response, "text", None) else ""
+        letters = list(doc.choices)
+        gold = doc.gold_index
+        if isinstance(gold, (list, tuple)):
+            gold = gold[0]
+
+        pred = _extract_arabic_choice_letter(gen, letters)
+        if pred is not None:
+            pn = _norm_arabic_letter(pred)
+            for i, letter in enumerate(letters):
+                if _norm_arabic_letter(letter) == pn:
+                    return 1.0 if i == gold else 0.0
+
+        texts = (doc.specific or {}).get("option_texts")
+        if texts:
+            hits = [i for i, t in enumerate(texts) if t and t.strip() and t.strip() in gen]
+            if len(hits) == 1:
+                return 1.0 if hits[0] == gold else 0.0
+        return 0.0
+
+
+arabic_mcq_gen_metric = SampleLevelMetric(
+    metric_name="gen_acc",
+    sample_level_fn=ArabicMCQGenerative(),
+    category=SamplingMethod.GENERATIVE,
+    corpus_level_fn=np.mean,
+    higher_is_better=True,
+)
+
+# Shared instruction for every generative MCQ variant: answer with the option letter only.
+GEN_INSTRUCTION = (
+    "السؤال التالي هو سؤال متعدد الإختيارات. اختر الإجابة الصحيحة واكتب حرفها فقط (أ، ب، ج، ...) دون أي شرح.\n\n"
+)
+
+# Arabic answer letters used to label options in the generative variants (up to 5 options).
+_AR_LETTERS = {"A": "أ", "B": "ب", "C": "ج", "D": "د", "E": "هـ"}
+
+
+def arabic_mmlu_gen_pfn(line, task_name: str = None):
+    instruction = GEN_INSTRUCTION
+    latin_to_arabic = _AR_LETTERS
+
+    option_texts = []
+    valid_keys_latin = []
+    valid_keys_arabic = []
+    for idx, key in enumerate(["A", "B", "C", "D", "E"]):
+        option = line.get(f"Option {idx + 1}")
+        if option:
+            option_texts.append(str(option))
+            valid_keys_latin.append(key)
+            valid_keys_arabic.append(latin_to_arabic[key])
+
+    answer_index = valid_keys_latin.index(line["Answer Key"])
+
+    query = f"{instruction}{line['Question']}\n"
+    query += "".join([f"{key}. {text}\n" for key, text in zip(valid_keys_arabic, option_texts)])
+    query += "الإجابة:"
+
+    return Doc(
+        task_name=task_name,
+        query=query,
+        choices=valid_keys_arabic,  # the answer letters; metric parses the generation against these
+        gold_index=answer_index,
+        instruction=instruction,
+        specific={"option_texts": option_texts},
+    )
+
+
+class CustomArabicMMLUGenTask(LightevalTaskConfig):
+    def __init__(self, name, hf_subset):
+        super().__init__(
+            name=name,
+            hf_subset=hf_subset,
+            prompt_function=arabic_mmlu_gen_pfn,
+            hf_repo="MBZUAI/ArabicMMLU",
+            metrics=[arabic_mcq_gen_metric],
+            hf_avail_splits=["test"],
+            evaluation_splits=["test"],
+            few_shots_split=["dev"],
+            few_shots_select="sequential",
+            suite=["community"],
+            generation_size=50,
+            stop_sequence=["\n\n"],
+            version=0,
+        )
+
+
+ARABIC_MMLU_GEN_TASKS = [
+    CustomArabicMMLUGenTask(name=f"arabic_mmlu_gen:{subset}", hf_subset=subset) for subset in ARABIC_MMLU_SUBSETS
+]
+
+
+def _gen_doc(task_name, instruction, body, letters, option_texts, gold_index):
+    """Build a generative-MCQ Doc: options shown with Arabic letters, letter parsed from output."""
+    query = f"{instruction}{body}\n"
+    query += "".join([f"{letter}. {text}\n" for letter, text in zip(letters, option_texts)])
+    query += "الإجابة:"
+    return Doc(
+        task_name=task_name,
+        query=query,
+        choices=list(letters),
+        gold_index=gold_index,
+        instruction=instruction,
+        specific={"option_texts": list(option_texts)},
+    )
+
+
+def arabic_mmlu_ht_gen_pfn(line, task_name: str = None):
+    option_texts = [str(c) for c in line["choices"]]
+    letters = LETTER_INDICES_AR[: len(option_texts)]
+    return _gen_doc(task_name, GEN_INSTRUCTION, line["question"], letters, option_texts, line["answer"])
+
+
+class CustomArabicMMLUHTGenTask(LightevalTaskConfig):
+    def __init__(self, name, hf_subset):
+        super().__init__(
+            name=name,
+            hf_subset=hf_subset,
+            prompt_function=arabic_mmlu_ht_gen_pfn,
+            hf_repo="MBZUAI/human_translated_arabic_mmlu",
+            metrics=[arabic_mcq_gen_metric],
+            hf_avail_splits=["test"],
+            evaluation_splits=["test"],
+            few_shots_split=None,
+            few_shots_select=None,
+            suite=["community"],
+            generation_size=50,
+            stop_sequence=["\n\n"],
+            version=0,
+        )
+
+
+ARABIC_MMLU_HT_GEN_TASKS = [
+    CustomArabicMMLUHTGenTask(name=f"arabic_mmlu_ht_gen:{subset}", hf_subset=subset)
+    for subset in ARABIC_MMLU_HT_SUBSETS
+]
+
+
+def aratrust_gen_pfn(line, task_name: str = None):
+    option_texts = [str(line["A"]), str(line["B"]), str(line["C"])]
+    letters = LETTER_INDICES_AR[:3]
+    answer_index = LETTER_INDICES_AR.index(line["Answer"])
+    return _gen_doc(task_name, GEN_INSTRUCTION, line["Question"], letters, option_texts, answer_index)
+
+
+class CustomAraTrustGenTask(LightevalTaskConfig):
+    def __init__(self, name, hf_subset):
+        super().__init__(
+            name=name,
+            hf_subset=hf_subset,
+            prompt_function=aratrust_gen_pfn,
+            hf_repo="asas-ai/AraTrust-categorized",
+            metrics=[arabic_mcq_gen_metric],
+            hf_avail_splits=["train"],
+            evaluation_splits=["train"],
+            few_shots_split=None,
+            few_shots_select=None,
+            suite=["community"],
+            generation_size=50,
+            stop_sequence=["\n\n"],
+            version=0,
+        )
+
+
+ARATRUST_GEN_TASKS = [
+    CustomAraTrustGenTask(name=f"aratrust_gen:{subset}", hf_subset=subset) for subset in ARATRUST_SUBSETS
+]
+
+
+def arabic_exams_gen_pfn(line, task_name: str = None):
+    topic = line["subject"].replace("_", " ")
+    option_texts = [str(line["A"]), str(line["B"]), str(line["C"]), str(line["D"])]
+    letters = LETTER_INDICES_AR[:4]
+    answer_index = LETTER_INDICES.index(line["answer"])
+    body = f"({topic}) {line['question']}"
+    return _gen_doc(task_name, GEN_INSTRUCTION, body, letters, option_texts, answer_index)
+
+
+arabic_exams_gen_task = LightevalTaskConfig(
+    name="arabic_exams_gen",
+    prompt_function=arabic_exams_gen_pfn,
+    suite=["community"],
+    hf_repo="OALL/Arabic_EXAMS",
+    hf_subset="default",
+    hf_avail_splits=["test", "validation"],
+    evaluation_splits=["test"],
+    few_shots_split="validation",
+    few_shots_select="sequential",
+    metrics=[arabic_mcq_gen_metric],
+    generation_size=50,
+    stop_sequence=["\n\n"],
+    version=0,
+)
+
+
+def alghafa_gen_pfn(line, task_name: str = None):
+    answer_index = int(line["label"])
+    allowed_keys = [f"sol{i}" for i in range(1, 6)]
+    option_texts = [str(line[key]) for key in allowed_keys if key in line]
+    letters = LETTER_INDICES_AR[: len(option_texts)]
+    return _gen_doc(task_name, GEN_INSTRUCTION, line["query"], letters, option_texts, answer_index)
+
+
+class CustomAlGhafaNativeGenTask(LightevalTaskConfig):
+    def __init__(self, name, hf_subset):
+        super().__init__(
+            name=name,
+            hf_subset=hf_subset,
+            prompt_function=alghafa_gen_pfn,
+            hf_repo="OALL/AlGhafa-Arabic-LLM-Benchmark-Native",
+            metrics=[arabic_mcq_gen_metric],
+            hf_avail_splits=["test", "validation"],
+            evaluation_splits=["test"],
+            few_shots_split="validation",
+            few_shots_select="sequential",
+            suite=["community"],
+            generation_size=50,
+            stop_sequence=["\n\n"],
+            version=0,
+        )
+
+
+ALGHAFA_GEN_TASKS = [
+    CustomAlGhafaNativeGenTask(name=f"alghafa_gen:{subset}", hf_subset=subset) for subset in ALGHAFA_SUBSETS
+]
+
+
+def madinah_qa_gen_pfn(line, task_name: str = None):
+    option_texts = []
+    valid_keys_latin = []
+    valid_keys_arabic = []
+    for idx, key in enumerate(["A", "B", "C", "D", "E"]):
+        option = line.get(f"Option {idx + 1}")
+        if option:
+            option_texts.append(str(option))
+            valid_keys_latin.append(key)
+            valid_keys_arabic.append(_AR_LETTERS[key])
+
+    answer_index = valid_keys_latin.index(line["Answer Key"])
+    body = f"السياق:\n{line['Context']}\nالسؤال:\n{line['Question']}"
+    return _gen_doc(task_name, GEN_INSTRUCTION, body, valid_keys_arabic, option_texts, answer_index)
+
+
+class CustomMadinahQAGenTask(LightevalTaskConfig):
+    def __init__(self, name, hf_subset):
+        super().__init__(
+            name=name,
+            hf_subset=hf_subset,
+            prompt_function=madinah_qa_gen_pfn,
+            hf_repo="MBZUAI/MadinahQA",
+            metrics=[arabic_mcq_gen_metric],
+            hf_avail_splits=["test"],
+            evaluation_splits=["test"],
+            few_shots_split=["dev"],
+            few_shots_select="sequential",
+            suite=["community"],
+            generation_size=50,
+            stop_sequence=["\n\n"],
+            version=0,
+        )
+
+
+MADINAH_QA_GEN_TASKS = [
+    CustomMadinahQAGenTask(name=f"madinah_qa_gen:{subset}", hf_subset=subset) for subset in MADINAH_QA_SUBSETS
+]
+
+
 TASKS_TABLE = (
     ARABIC_MMLU_TASKS
     + ARABIC_MMLU_HT_TASKS
@@ -1035,6 +1938,24 @@ TASKS_TABLE = (
     + ALGHAFA_TASKS
     + ARATRUST_TASKS
     + MADINAH_QA_TASKS
+    + ARABIC_MMLU_CF_TASKS
+    + ARABIC_MMLU_HT_CF_TASKS
+    + ARATRUST_CF_TASKS
+    + ALGHAFA_CF_TASKS
+    + MADINAH_QA_CF_TASKS
+    + [arabic_exams_cf_task]
+    + ARABIC_MMLU_HYBRID_TASKS
+    + ARABIC_MMLU_HT_HYBRID_TASKS
+    + ARATRUST_HYBRID_TASKS
+    + ALGHAFA_HYBRID_TASKS
+    + MADINAH_QA_HYBRID_TASKS
+    + [arabic_exams_hybrid_task]
+    + ARABIC_MMLU_GEN_TASKS
+    + ARABIC_MMLU_HT_GEN_TASKS
+    + ARATRUST_GEN_TASKS
+    + ALGHAFA_GEN_TASKS
+    + MADINAH_QA_GEN_TASKS
+    + [arabic_exams_gen_task]
     + [arabic_exams_task]
     + [race_ar_task]
     + [piqa_ar_task]

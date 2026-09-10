@@ -1,0 +1,117 @@
+community|alghafa_hybrid:meta_ar_dialects|0
+community|alghafa_hybrid:meta_ar_msa|0
+community|alghafa_hybrid:multiple_choice_facts_truefalse_balanced_task|0
+community|alghafa_hybrid:multiple_choice_grounded_statement_soqal_task|0
+community|alghafa_hybrid:multiple_choice_grounded_statement_xglue_mlqa_task|0
+community|alghafa_hybrid:multiple_choice_rating_sentiment_no_neutral_task|0
+community|alghafa_hybrid:multiple_choice_rating_sentiment_task|0
+community|alghafa_hybrid:multiple_choice_sentiment_task|0
+community|arabic_exams_hybrid|0
+community|arabic_mmlu_hybrid:Islamic Studies|0
+community|arabic_mmlu_hybrid:Islamic Studies (Middle School)|0
+community|arabic_mmlu_hybrid:Islamic Studies (Primary School)|0
+community|arabic_mmlu_hybrid:Islamic Studies (High School)|0
+community|arabic_mmlu_hybrid:Driving Test|0
+community|arabic_mmlu_hybrid:Natural Science (Middle School)|0
+community|arabic_mmlu_hybrid:Natural Science (Primary School)|0
+community|arabic_mmlu_hybrid:History (Middle School)|0
+community|arabic_mmlu_hybrid:History (Primary School)|0
+community|arabic_mmlu_hybrid:History (High School)|0
+community|arabic_mmlu_hybrid:General Knowledge|0
+community|arabic_mmlu_hybrid:General Knowledge (Middle School)|0
+community|arabic_mmlu_hybrid:General Knowledge (Primary School)|0
+community|arabic_mmlu_hybrid:Law (Professional)|0
+community|arabic_mmlu_hybrid:Physics (High School)|0
+community|arabic_mmlu_hybrid:Social Science (Middle School)|0
+community|arabic_mmlu_hybrid:Social Science (Primary School)|0
+community|arabic_mmlu_hybrid:Management (University)|0
+community|arabic_mmlu_hybrid:Arabic Language (Middle School)|0
+community|arabic_mmlu_hybrid:Arabic Language (Primary School)|0
+community|arabic_mmlu_hybrid:Arabic Language (High School)|0
+community|arabic_mmlu_hybrid:Political Science (University)|0
+community|arabic_mmlu_hybrid:Philosophy (High School)|0
+community|arabic_mmlu_hybrid:Accounting (University)|0
+community|arabic_mmlu_hybrid:Computer Science (Middle School)|0
+community|arabic_mmlu_hybrid:Computer Science (Primary School)|0
+community|arabic_mmlu_hybrid:Computer Science (High School)|0
+community|arabic_mmlu_hybrid:Computer Science (University)|0
+community|arabic_mmlu_hybrid:Geography (Middle School)|0
+community|arabic_mmlu_hybrid:Geography (Primary School)|0
+community|arabic_mmlu_hybrid:Geography (High School)|0
+community|arabic_mmlu_hybrid:Math (Primary School)|0
+community|arabic_mmlu_hybrid:Biology (High School)|0
+community|arabic_mmlu_hybrid:Economics (Middle School)|0
+community|arabic_mmlu_hybrid:Economics (High School)|0
+community|arabic_mmlu_hybrid:Economics (University)|0
+community|arabic_mmlu_hybrid:Arabic Language (General)|0
+community|arabic_mmlu_hybrid:Arabic Language (Grammar)|0
+community|arabic_mmlu_hybrid:Civics (Middle School)|0
+community|arabic_mmlu_hybrid:Civics (High School)|0
+community|madinah_qa_hybrid:Arabic Language (General)|0
+community|madinah_qa_hybrid:Arabic Language (Grammar)|0
+community|aratrust_hybrid:Trustfulness|0
+community|aratrust_hybrid:MentalHealth|0
+community|aratrust_hybrid:PhysicalHealth|0
+community|aratrust_hybrid:Offensive|0
+community|aratrust_hybrid:Ethics|0
+community|aratrust_hybrid:Privacy|0
+community|aratrust_hybrid:Unfairness|0
+community|aratrust_hybrid:Illegal|0
+community|arabic_mmlu_ht_hybrid:abstract_algebra|0
+community|arabic_mmlu_ht_hybrid:anatomy|0
+community|arabic_mmlu_ht_hybrid:astronomy|0
+community|arabic_mmlu_ht_hybrid:business_ethics|0
+community|arabic_mmlu_ht_hybrid:clinical_knowledge|0
+community|arabic_mmlu_ht_hybrid:college_biology|0
+community|arabic_mmlu_ht_hybrid:college_chemistry|0
+community|arabic_mmlu_ht_hybrid:college_computer_science|0
+community|arabic_mmlu_ht_hybrid:college_mathematics|0
+community|arabic_mmlu_ht_hybrid:college_medicine|0
+community|arabic_mmlu_ht_hybrid:college_physics|0
+community|arabic_mmlu_ht_hybrid:computer_security|0
+community|arabic_mmlu_ht_hybrid:conceptual_physics|0
+community|arabic_mmlu_ht_hybrid:econometrics|0
+community|arabic_mmlu_ht_hybrid:electrical_engineering|0
+community|arabic_mmlu_ht_hybrid:elementary_mathematics|0
+community|arabic_mmlu_ht_hybrid:formal_logic|0
+community|arabic_mmlu_ht_hybrid:global_facts|0
+community|arabic_mmlu_ht_hybrid:high_school_biology|0
+community|arabic_mmlu_ht_hybrid:high_school_chemistry|0
+community|arabic_mmlu_ht_hybrid:high_school_computer_science|0
+community|arabic_mmlu_ht_hybrid:high_school_european_history|0
+community|arabic_mmlu_ht_hybrid:high_school_geography|0
+community|arabic_mmlu_ht_hybrid:high_school_government_and_politics|0
+community|arabic_mmlu_ht_hybrid:high_school_macroeconomics|0
+community|arabic_mmlu_ht_hybrid:high_school_mathematics|0
+community|arabic_mmlu_ht_hybrid:high_school_microeconomics|0
+community|arabic_mmlu_ht_hybrid:high_school_physics|0
+community|arabic_mmlu_ht_hybrid:high_school_psychology|0
+community|arabic_mmlu_ht_hybrid:high_school_statistics|0
+community|arabic_mmlu_ht_hybrid:high_school_us_history|0
+community|arabic_mmlu_ht_hybrid:high_school_world_history|0
+community|arabic_mmlu_ht_hybrid:human_aging|0
+community|arabic_mmlu_ht_hybrid:human_sexuality|0
+community|arabic_mmlu_ht_hybrid:international_law|0
+community|arabic_mmlu_ht_hybrid:jurisprudence|0
+community|arabic_mmlu_ht_hybrid:logical_fallacies|0
+community|arabic_mmlu_ht_hybrid:machine_learning|0
+community|arabic_mmlu_ht_hybrid:management|0
+community|arabic_mmlu_ht_hybrid:marketing|0
+community|arabic_mmlu_ht_hybrid:medical_genetics|0
+community|arabic_mmlu_ht_hybrid:miscellaneous|0
+community|arabic_mmlu_ht_hybrid:moral_disputes|0
+community|arabic_mmlu_ht_hybrid:moral_scenarios|0
+community|arabic_mmlu_ht_hybrid:nutrition|0
+community|arabic_mmlu_ht_hybrid:philosophy|0
+community|arabic_mmlu_ht_hybrid:prehistory|0
+community|arabic_mmlu_ht_hybrid:professional_accounting|0
+community|arabic_mmlu_ht_hybrid:professional_law|0
+community|arabic_mmlu_ht_hybrid:professional_medicine|0
+community|arabic_mmlu_ht_hybrid:professional_psychology|0
+community|arabic_mmlu_ht_hybrid:public_relations|0
+community|arabic_mmlu_ht_hybrid:security_studies|0
+community|arabic_mmlu_ht_hybrid:sociology|0
+community|arabic_mmlu_ht_hybrid:us_foreign_policy|0
+community|arabic_mmlu_ht_hybrid:virology|0
+community|arabic_mmlu_ht_hybrid:world_religions|0
+# community|alrage_qa|0
