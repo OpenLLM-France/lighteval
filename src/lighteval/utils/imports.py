@@ -214,3 +214,25 @@ def requires(*specified_backends):
             return wrapper
 
     return inner_fn
+
+
+def vllm_get_tokenizer(*args, **kwargs):
+    """Version-tolerant wrapper around vllm's ``get_tokenizer``.
+
+    Across vllm versions this helper hides two breaking changes so lighteval stays compatible
+    with both older (>=0.10) and newer (>=0.23) vllm:
+
+    - The function moved from ``vllm.transformers_utils.tokenizer`` to ``vllm.tokenizers``.
+    - The explicit ``tokenizer_mode`` parameter was dropped (its default "auto" is now implicit,
+      and it only survives as part of ``**kwargs`` where it would be wrongly forwarded to the HF
+      loader). We therefore only pass ``tokenizer_mode`` when the installed version declares it
+      as a real parameter.
+    """
+    try:
+        from vllm.transformers_utils.tokenizer import get_tokenizer  # vllm < ~0.23
+    except ImportError:
+        from vllm.tokenizers import get_tokenizer  # vllm >= ~0.23
+
+    if "tokenizer_mode" not in inspect.signature(get_tokenizer).parameters:
+        kwargs.pop("tokenizer_mode", None)
+    return get_tokenizer(*args, **kwargs)

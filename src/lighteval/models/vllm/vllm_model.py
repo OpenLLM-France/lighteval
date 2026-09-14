@@ -47,7 +47,7 @@ from lighteval.models.utils import _simplify_name, uses_chat_template
 from lighteval.tasks.prompt_manager import PromptManager
 from lighteval.tasks.requests import Doc, SamplingMethod
 from lighteval.utils.cache_management import SampleCache, cached
-from lighteval.utils.imports import is_package_available, requires
+from lighteval.utils.imports import is_package_available, requires, vllm_get_tokenizer
 
 
 logger = logging.getLogger(__name__)
@@ -61,8 +61,11 @@ if is_package_available("vllm"):
         destroy_distributed_environment,
         destroy_model_parallel,
     )
-    from vllm.transformers_utils.tokenizer import get_tokenizer
     from vllm.v1.engine.async_llm import AsyncEngineArgs, AsyncLLM
+
+    # NOTE: `get_tokenizer` is imported lazily through `vllm_get_tokenizer` (lighteval.utils.imports)
+    # because its import path changed across vllm versions (vllm.transformers_utils.tokenizer ->
+    # vllm.tokenizers).
 
     logging.getLogger("vllm").propagate = True
     logging.getLogger("vllm").handlers.clear()
@@ -72,7 +75,7 @@ if is_package_available("vllm"):
 else:
     from unittest.mock import Mock
 
-    LLM = SamplingParams = get_tokenizer = ray = distribute = destroy_distributed_environment = (
+    LLM = SamplingParams = ray = distribute = destroy_distributed_environment = (
         destroy_model_parallel
     ) = Mock()
     AsyncLLM = AsyncEngineArgs = RequestOutput = Mock()
@@ -80,6 +83,25 @@ else:
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
 STARTING_BATCH_SIZE = 512
+
+
+def _infer_vllm_max_length(model) -> Optional[int]:
+    """Read the model's max sequence length from a vLLM engine, across vLLM versions.
+
+    The attribute path moved between the V0 engine (``model.llm_engine.model_config``) and the
+    V1 engine (``model.model_config``; newer builds also drop ``max_seq_len_to_capture``). We try
+    the known locations in the historical order of preference and fall back to ``None`` (leaving
+    ``max_length`` unset, with truncation disabled) instead of crashing on an unknown layout.
+    """
+    for holder in (getattr(model, "llm_engine", None), model):
+        model_config = getattr(holder, "model_config", None)
+        if model_config is None:
+            continue
+        for attr in ("max_seq_len_to_capture", "max_model_len"):
+            value = getattr(model_config, attr, None)
+            if value:
+                return int(value)
+    return None
 
 
 class VLLMModelConfig(ModelConfig):
@@ -429,15 +451,12 @@ class VLLMModel(LightevalModel):
         # Inferring from the tokenizer will cause vllm to bug for models with mismatches between model
         # config and tk config, like mistralai/Mistral-7B-v0.1
         if self._max_length is None:
-            try:
-                self._max_length = model.llm_engine.model_config.max_seq_len_to_capture
-            except AttributeError:
-                self._max_length = model.llm_engine.model_config.max_model_len
+            self._max_length = _infer_vllm_max_length(model)
 
         return model
 
     def _create_auto_tokenizer(self, config: VLLMModelConfig):
-        tokenizer = get_tokenizer(
+        tokenizer = vllm_get_tokenizer(
             config.tokenizer or config.model_name,  # use HF tokenizer for non-HF models, like GGUF model.
             tokenizer_mode="auto",
             trust_remote_code=config.trust_remote_code,
@@ -819,10 +838,7 @@ class AsyncVLLMModel(VLLMModel):
 
         # If the max_length can't get extracted from the config, it will be inferred from the model
         if self._max_length is None:
-            try:
-                self._max_length = model.model_config.max_seq_len_to_capture
-            except AttributeError:
-                self._max_length = model.model_config.max_model_len
+            self._max_length = _infer_vllm_max_length(model)
 
         return model
 

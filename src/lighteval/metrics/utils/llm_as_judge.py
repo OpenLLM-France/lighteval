@@ -35,7 +35,7 @@ from requests.exceptions import HTTPError
 from tqdm import tqdm
 from tqdm.asyncio import tqdm_asyncio
 
-from lighteval.utils.imports import raise_if_package_not_available
+from lighteval.utils.imports import raise_if_package_not_available, vllm_get_tokenizer
 from lighteval.utils.utils import as_list
 
 
@@ -169,10 +169,9 @@ class JudgeLM:
                 raise_if_package_not_available("vllm")
                 if self.pipe is None:
                     from vllm import LLM, SamplingParams
-                    from vllm.transformers_utils.tokenizer import get_tokenizer
 
                     self.sampling_params = SamplingParams(temperature=0.8, top_p=0.95, max_tokens=self.max_tokens)
-                    self.tokenizer = get_tokenizer(self.model, tokenizer_mode="auto")
+                    self.tokenizer = vllm_get_tokenizer(self.model, tokenizer_mode="auto")
                     self.pipe = LLM(
                         model=self.model,
                         max_model_len=int(os.environ.get("LIGHTEVAL_JUDGE_MAX_MODEL_LEN", 65536)),

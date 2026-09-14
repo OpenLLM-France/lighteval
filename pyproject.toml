@@ -99,7 +99,7 @@ nanotron = [
 ]
 tensorboardX = ["tensorboardX"]
 vllm = [
-  "vllm>=0.10.0", # ,<0.10.2",
+  "vllm>=0.10.0",  # backend kept compatible from 0.10 up to >=0.23 (see lighteval/models/vllm/vllm_model.py)
   "ray",
   "more_itertools"
 ]
