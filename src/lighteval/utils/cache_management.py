@@ -385,6 +385,12 @@ def cached(sampling_method: SamplingMethod = None):  # noqa C901
         def wrapper(self, docs: Union[Doc, List[Doc]], *args, **kwargs):  # noqa C901
             docs = as_list(docs)
 
+            # Escape hatch: LIGHTEVAL_DISABLE_CACHE bypasses the on-disk sample cache. Needed for
+            # tasks whose docs are huge (e.g. live_code_bench: code + test cases), where the parquet
+            # serialization of the cache overflows the 2 GB limit (ArrowInvalid: offset overflow).
+            if os.environ.get("LIGHTEVAL_DISABLE_CACHE"):
+                return func(self, docs, *args, **kwargs)
+
             # Check if caching is enabled for the model
             if not hasattr(self, "_cache") or self._cache is None:
                 return func(self, docs, *args, **kwargs)
