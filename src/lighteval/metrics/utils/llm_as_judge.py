@@ -300,17 +300,17 @@ class JudgeLM:
         return response
 
     def __call_vllm(self, prompt):
-        from vllm import TokensPrompt
-
         # add_generation_prompt=True opens the assistant turn so the model answers instead of derailing.
-        tokenized = [self.tokenizer.apply_chat_template(p, add_generation_prompt=True) for p in prompt]
+        # Render each chat to a STRING (tokenize=False) and let vLLM tokenize it. Passing token ids is
+        # fragile: apply_chat_template(tokenize=True) may return a BatchEncoding (not a plain list[int])
+        # depending on the tokenizer, and vLLM then chokes ("'>' not supported between str and int").
+        rendered = [self.tokenizer.apply_chat_template(p, add_generation_prompt=True, tokenize=False) for p in prompt]
         output = self.pipe.generate(
-            # prompt_token_ids=tokenized, # vllm 0.10.1
-            [TokensPrompt(prompt_token_ids=input) for input in tokenized],
+            rendered,
             sampling_params=self.sampling_params,
             use_tqdm=True,
         )
-        outputs = [output.outputs[0].text for output in output]
+        outputs = [out.outputs[0].text for out in output]
         return outputs
 
     def __call_litellm(self, prompts):  # noqa: C901
