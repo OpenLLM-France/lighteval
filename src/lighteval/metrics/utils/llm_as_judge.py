@@ -176,6 +176,10 @@ class JudgeLM:
                         model=self.model,
                         max_model_len=int(os.environ.get("LIGHTEVAL_JUDGE_MAX_MODEL_LEN", 65536)),
                         gpu_memory_utilization=float(os.environ.get("LIGHTEVAL_JUDGE_GPU_MEM_UTIL", 0.8)),
+                        # LIGHTEVAL_JUDGE_ENFORCE_EAGER=1 disables CUDA graphs for the judge engine.
+                        # Needed on some GPUs (e.g. NVIDIA GB10 / vLLM 0.27), where the judge's cudagraph
+                        # replay hangs on the last batch. Off by default (unchanged elsewhere).
+                        enforce_eager=os.environ.get("LIGHTEVAL_JUDGE_ENFORCE_EAGER", "").lower() in ("1", "true", "yes"),
                         dtype="float16",
                     )
                 return self.__call_vllm
