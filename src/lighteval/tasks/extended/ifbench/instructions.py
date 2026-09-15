@@ -77,8 +77,13 @@ class Instruction:
 
         global RESOURCES_DOWNLOADED
         if not RESOURCES_DOWNLOADED:
-            nltk.download("punkt_tab")
-            nltk.download("averaged_perceptron_tagger_eng")
+            # Download only if missing (avoids a network-index hang on offline compute nodes).
+            for _res, _path in (("punkt_tab", "tokenizers/punkt_tab"),
+                                ("averaged_perceptron_tagger_eng", "taggers/averaged_perceptron_tagger_eng")):
+                try:
+                    nltk.data.find(_path)
+                except LookupError:
+                    nltk.download(_res)
 
             try:
                 spacy.load("en_core_web_sm")
