@@ -85,6 +85,26 @@ os.environ["TOKENIZERS_PARALLELISM"] = "false"
 STARTING_BATCH_SIZE = 512
 
 
+def _filter_vllm_kwargs(kwargs: dict) -> dict:
+    """Keep only the kwargs accepted by the installed vLLM ``EngineArgs``.
+
+    vLLM changes its engine arguments across versions (e.g. ``swap_space`` exists up to ~0.23 but was
+    removed in 0.27). Passing an argument the installed version does not know crashes ``LLM(**kwargs)``.
+    We therefore drop keys that are not ``EngineArgs`` fields for the installed vLLM. This never drops
+    a valid argument (only ones the running version does not have), and if ``EngineArgs`` cannot be
+    introspected (unknown layout) it returns the kwargs unchanged — so it is a no-op on older vLLM.
+    """
+    try:
+        import dataclasses
+
+        from vllm.engine.arg_utils import EngineArgs
+
+        valid = {f.name for f in dataclasses.fields(EngineArgs)}
+        return {k: v for k, v in kwargs.items() if k in valid}
+    except Exception:
+        return kwargs
+
+
 def _infer_vllm_max_length(model) -> Optional[int]:
     """Read the model's max sequence length from a vLLM engine, across vLLM versions.
 
@@ -445,7 +465,7 @@ class VLLMModel(LightevalModel):
                 )
             return None
 
-        model = LLM(**self.model_args)
+        model = LLM(**_filter_vllm_kwargs(self.model_args))
 
         # If the max_length can't get extracted from the config, it will be inferred from the model
         # Inferring from the tokenizer will cause vllm to bug for models with mismatches between model
@@ -660,7 +680,7 @@ class VLLMModel(LightevalModel):
                 num_gpus=self.tensor_parallel_size * self.pipeline_parallel_size * self.prefill_context_parallel_size
             )
             def run_inference_one_model(model_args: dict, sampling_params: SamplingParams, requests):
-                llm = LLM(**model_args)
+                llm = LLM(**_filter_vllm_kwargs(model_args))
                 return llm.generate(
                     # prompt_token_ids=requests, # vllm 0.10.1
                     [TokensPrompt(prompt_token_ids=request) for request in requests],
