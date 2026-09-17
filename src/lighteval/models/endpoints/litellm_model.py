@@ -208,7 +208,13 @@ class LiteLLMClient(LightevalModel):
             "messages": prompt,
             "response_format": {"type": "text"},
             "max_tokens": max_new_tokens,
-            "logprobs": return_logits if self.provider == "openai" else None,
+            # Never request per-token logprobs here: this endpoint is generative-only
+            # (loglikelihood raises NotImplementedError) and greedy_until only reads the text,
+            # so logprobs are unused. Requesting them makes the server return thousands of
+            # TopLogprob objects per response, which accumulate over all samples in the raw
+            # responses held in memory -> ~15 MB/sample host-RAM leak (OOM on e.g. mmlu_pro's
+            # 12032 samples). Keeping it off holds RAM flat (~2 GB instead of ~200 GB).
+            "logprobs": None,
             "stop": stop_sequence,
             "base_url": self.base_url,
             "api_key": self.api_key,
