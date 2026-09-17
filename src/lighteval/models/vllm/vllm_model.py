@@ -75,9 +75,7 @@ if is_package_available("vllm"):
 else:
     from unittest.mock import Mock
 
-    LLM = SamplingParams = ray = distribute = destroy_distributed_environment = (
-        destroy_model_parallel
-    ) = Mock()
+    LLM = SamplingParams = ray = distribute = destroy_distributed_environment = destroy_model_parallel = Mock()
     AsyncLLM = AsyncEngineArgs = RequestOutput = Mock()
 
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
@@ -100,6 +98,13 @@ def _filter_vllm_kwargs(kwargs: dict) -> dict:
         from vllm.engine.arg_utils import EngineArgs
 
         valid = {f.name for f in dataclasses.fields(EngineArgs)}
+        dropped = sorted(k for k in kwargs if k not in valid)
+        if dropped:
+            logger.warning(
+                "Dropping vLLM engine arg(s) not accepted by the installed vLLM version: %s. "
+                "If you rely on any of these, check whether they were renamed/removed in your vLLM.",
+                ", ".join(dropped),
+            )
         return {k: v for k, v in kwargs.items() if k in valid}
     except Exception:
         return kwargs
