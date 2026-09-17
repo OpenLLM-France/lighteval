@@ -1014,10 +1014,17 @@ class JudgeLLM(SampleLevelComputation):
 
             case "transformers" | "vllm":
                 logger.debug("Checking availability of Transformers or VLLM model")
-                api = HfApi()
-                models = api.list_models(model_name=judge_model_name)
-                if not models:
-                    raise ValueError(f"{judge_model_name} not found on Hugging Face Hub")
+                # HfApi().list_models() is a live Hub API call that ignores HF_HUB_OFFLINE and hangs
+                # indefinitely on offline compute nodes (e.g. Adastra), stalling the whole run at
+                # "COMPUTING METRICS". Skip this existence check when offline — the judge weights are
+                # already in the local HF cache, so the check is unnecessary there.
+                if os.environ.get("HF_HUB_OFFLINE", "").lower() in ("1", "true", "yes"):
+                    logger.debug("HF_HUB_OFFLINE set — skipping the Hub availability check for the judge model")
+                else:
+                    api = HfApi()
+                    models = api.list_models(model_name=judge_model_name)
+                    if not models:
+                        raise ValueError(f"{judge_model_name} not found on Hugging Face Hub")
 
             case _:
                 raise ValueError(f"{judge_backend} is not a valid backend for llm as a judge metric")
