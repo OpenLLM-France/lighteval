@@ -1680,7 +1680,12 @@ def _get_sentence_tokenizer():
 
 def count_stopwords(text):
     """Counts the number of stopwords."""
-    nltk.download("stopwords")
+    # Download only if missing: this runs per sample, and an unconditional nltk.download() hits the
+    # network index every call — which hangs (~1 min timeout each) on offline compute nodes (Adastra).
+    try:
+        nltk.data.find("corpora/stopwords")
+    except LookupError:
+        nltk.download("stopwords")
     stopwords = nltk.corpus.stopwords.words("english")
     tokenizer = nltk.tokenize.RegexpTokenizer(r"\w+")
     tokens = tokenizer.tokenize(text)
