@@ -21,246 +21,405 @@
 # SOFTWARE.
 
 # ruff: noqa: F405, F403, F401
-"""French BIG-Bench-Hard (BBH-fr) as lighteval community tasks.
+"""BIG-Bench-Hard (BBH) as lighteval community tasks, chain-of-thought few-shot.
 
-English BBH already ships with lighteval, so this file only adds the **French** version:
-- ``harness|bbh:*``    — generative, exact match, dataset ``lukaemon/bbh`` (mirrored here).
-- ``lighteval|bigbench:*`` — multiple-choice loglikelihood, dataset ``lighteval/bbh``.
+This reproduces the standard BBH protocol (Suzgun et al. 2022; lm-evaluation-harness'
+``bbh_cot_fewshot``): each prompt is a task description + **3 fixed chain-of-thought
+demonstrations** (each ending ``So the answer is X.``) + the test question. The model reasons
+step by step, and we recover its *final committed answer* with a robust, type-aware extractor
+(see below) and match it against gold — tolerating markdown, alternate answer cues, and the
+verbose phrasing that a bare exact-match on ``the answer is`` would discard.
 
-This adds ``community|bbh_fr:<task>`` (27 subsets) on ``le-leadboard/bbh-fr``, matching the
-generative ``harness|bbh:*`` formulation: a zero-shot, direct-answer prompt
-``{instruction}Q: {input}\\nA:`` -> the model writes a short answer, scored by exact match
-against ``target``.
+- English: ``community|bbh:<task>``    on ``lukaemon/bbh`` — demonstrations ported verbatim from
+  lm-eval (``bbh_cot_fewshot_en.json``), so scores are comparable to lm-eval / the BBH leaderboard.
+- French:  ``community|bbh_fr:<task>`` on ``le-leadboard/bbh-fr`` — demonstrations in
+  ``bbh_cot_fewshot_fr.json`` (the 22 language-neutral tasks are translated; the 5 intrinsically
+  English tasks — word_sorting, hyperbaton, snarks, disambiguation_qa,
+  salient_translation_error_detection — are re-authored in French). There is no official French
+  BBH-CoT reference, so the French set is a localization, not an official benchmark.
 
-Note on formulation: BBH's canonical form (and lm-eval's default) is *chain-of-thought
-few-shot* with curated CoT demonstrations. The French dataset ships no CoT prompts, and its
-answer labels are translated (e.g. boolean -> ``Vrai`` / ``Incorrect``, yes/no -> ``Oui`` /
-``Non``, valid/invalid -> ``valide`` / ``invalidee``), so a faithful CoT-few-shot port is not
-possible for French. We therefore use the zero-shot direct-answer formulation, matching
-lighteval's existing generative ``bbh:*`` tasks. The English subset name for each task is kept
-in the table below only to document the English<->French mapping.
+The 3-shot CoT is fixed (baked into the prompt) exactly as in lm-eval; the ``|N|`` few-shot knob
+is inoperative here (``few_shots_split=None``), so always run these tasks at ``|0``.
 """
 
+import json
 import logging
+import os
+import re
 
-from lighteval.metrics.metrics import Metrics
-from lighteval.metrics.normalizations import helm_normalizer
-from lighteval.tasks.default_prompts import LETTER_INDICES
+import numpy as np
+
+from lighteval.metrics.metrics_sample import SampleLevelComputation
+from lighteval.metrics.utils.metric_utils import SampleLevelMetric
 from lighteval.tasks.lighteval_task import LightevalTaskConfig
-from lighteval.tasks.requests import Doc
+from lighteval.tasks.requests import Doc, SamplingMethod
 
 
 logger = logging.getLogger(__name__)
 
 
-# Same exact-match variants as lighteval's built-in bbh:* tasks (raw, helm-normalized, prefix).
-BBH_METRICS = [
-    Metrics.exact_match,
-    Metrics.exact_match(sample_params={"normalize_gold": helm_normalizer, "normalize_pred": helm_normalizer}),
-    Metrics.exact_match(sample_params={"type_exact_match": "prefix"}),
-    Metrics.exact_match(
-        sample_params={
-            "normalize_gold": helm_normalizer,
-            "normalize_pred": helm_normalizer,
-            "type_exact_match": "prefix",
-        }
-    ),
-    Metrics.exact_match(sample_params={"strip_strings": False}),
-]
+GENERATION_SIZE = 1024  # room for chain-of-thought (matches lm-eval's bbh_cot_fewshot)
+STOP_SEQUENCE = ["</s>", "Q", "\n\n"]  # stop after one reasoning block, as in lm-eval
 
-GENERATION_SIZE = 20  # mirrors lighteval's built-in bbh:* (short direct answers)
-STOP_SEQUENCE = ["</s>", "Q=", "\n\n"]
+# Correction for a mislabeled gold answer in le-leadboard/bbh-fr: the sophismes_formels
+# (formal_fallacies) subset labels the "invalid" class as the misspelled "invalidee" (neither the
+# option the prompt offers nor correct French). Canonicalize it to "invalide". See the upstream
+# report; remove once fixed. "invalidee" is unique to this subset, so applying it globally is safe.
+_GOLD_LABEL_FIXES = {"invalidee": "invalide"}
 
 
-def _letters(n: int) -> list[str]:
-    """Multiple-choice answer labels ``(A) .. (n)`` — identical across languages."""
-    return [f"({c})" for c in LETTER_INDICES[:n]]
+# canonical task key (== lukaemon/bbh subset) -> le-leadboard/bbh-fr config name
+FR_SUBSET = {
+    "boolean_expressions": "expressions_booléennes",
+    "causal_judgement": "jugement_causal",
+    "date_understanding": "compréhension_de_la_date",
+    "disambiguation_qa": "désambiguïsation_qa",
+    "dyck_languages": "dyck_languages",
+    "formal_fallacies": "sophismes_formels",
+    "geometric_shapes": "formes_géométriques",
+    "hyperbaton": "hyperbate",
+    "logical_deduction_five_objects": "déduction_logique_cinq_objets",
+    "logical_deduction_seven_objects": "déduction_logique_sept_objets",
+    "logical_deduction_three_objects": "déduction_logique_trois_objets",
+    "movie_recommendation": "recommandation_de_film",
+    "multistep_arithmetic_two": "multistep_arithmetic_two",
+    "navigate": "naviguer",
+    "object_counting": "comptage_d_objets",
+    "penguins_in_a_table": "pingouins_sur_une_table",
+    "reasoning_about_colored_objects": "raisonnement_sur_les_objets_colorés",
+    "ruin_names": "noms_de_ruines",
+    "salient_translation_error_detection": "détection_d_erreur_de_traduction_sailante",
+    "snarks": "sarcasmes",
+    "sports_understanding": "compréhension_des_sports",
+    "temporal_sequences": "séquences_temporelles",
+    "tracking_shuffled_objects_five_objects": "suivi_objets_mélangés_cinq_objets",
+    "tracking_shuffled_objects_seven_objects": "suivi_objets_mélangés_sept_objets",
+    "tracking_shuffled_objects_three_objects": "suivi_objets_mélangés_trois_objets",
+    "web_of_lies": "toile_de_mensonges",
+    "word_sorting": "tri_de_mots",
+}
+
+# HF datasets for each language.
+EN_REPO = "lukaemon/bbh"
+FR_REPO = "le-leadboard/bbh-fr"
+
+_HERE = os.path.dirname(os.path.abspath(__file__))
 
 
-# Answer-set builders. Each maps a dataset row to the closed list of possible answers; the gold is
-# located in it by exact string match, so the values must match the dataset's ``target`` exactly.
-#   - fixed list  -> a task with a fixed textual answer set (booleans, yes/no, ...); EN and FR differ.
-#   - _letters(n) -> a multiple-choice task with n options labelled (A), (B), ...
-#   - "open"      -> a free-form answer; the only "choice" is the gold itself.
-#   - "count"     -> object counting; the answer is an integer in 1..18.
-def _choices_fn(spec, lang):
-    if spec == "open":
-        return lambda line: [line["target"]]
-    if spec == "count":
-        _counts = [str(i) for i in range(1, 19)]
-        return lambda line: _counts
-    if isinstance(spec, int):  # letters(n)
-        _opts = _letters(spec)
-        return lambda line: _opts
-    if isinstance(spec, tuple) and spec[0] == "fixed":
-        _en, _fr = spec[1], spec[2]
-        _opts = _fr if lang == "fr" else _en
-        return lambda line: _opts
-    raise ValueError(f"Unknown choices spec: {spec!r}")
+def _load_demos(filename):
+    """Load a CoT demonstrations file (``{task: {description, doc_to_text, samples}}``), if present."""
+    path = os.path.join(_HERE, filename)
+    if not os.path.exists(path):
+        logger.warning(f"BBH CoT demos file not found: {path} (those tasks will be skipped).")
+        return {}
+    with open(path, encoding="utf-8") as f:
+        return json.load(f)
 
 
-def _make_bbh_prompt(instruction, choices_fn):
+_DEMOS = {
+    "en": _load_demos("bbh_cot_fewshot_en.json"),
+    "fr": _load_demos("bbh_cot_fewshot_fr.json"),
+}
+
+
+def _build_cot_query(demo: dict, test_input: str) -> str:
+    """Assemble: description + 3 CoT demonstrations + the test question (as in lm-eval)."""
+
+    def _render(inp):
+        return demo["doc_to_text"].replace("{{input}}", inp)
+
+    blocks = [_render(s["input"]) + s["target"] for s in demo["samples"]]
+    blocks.append(_render(test_input))
+    return demo["description"] + "\n\n".join(blocks)
+
+
+def _make_cot_prompt(task_key: str, lang: str):
+    demo = _DEMOS.get(lang, {}).get(task_key)
+
     def prompt_fn(line, task_name: str = None):
-        choices = choices_fn(line)
-        target = line["target"]
-        if target not in choices:
-            # A few source rows are malformed (e.g. bbh:movie_recommendation / ruin_names) or carry a
-            # label outside the closed set. Skip them instead of crashing the whole run.
-            logger.warning(f"[{task_name}] target {target!r} not in choices {choices}; skipping sample.")
-            return []
+        if demo is None:
+            return []  # no demonstrations available for this task/language
+        target = _GOLD_LABEL_FIXES.get(line["target"], line["target"])
         return Doc(
             task_name=task_name,
-            query=f"{instruction}Q: {line['input']}\nA:",
-            choices=choices,
-            gold_index=choices.index(target),
-            instruction=instruction,
+            query=_build_cot_query(demo, line["input"]),
+            choices=[target],
+            gold_index=0,
+            instruction=demo["description"],
         )
 
     return prompt_fn
 
 
-# One entry per BBH task:
-#   key, en_subset, fr_subset, en_instruction, fr_instruction, choices_spec
-# fmt: off
-BBH_TASKS = [
-    ("boolean_expressions", "boolean_expressions", "expressions_booléennes",
-     "Evaluate the result of a random Boolean expression.\n\n",
-     "Évaluez le résultat d'une expression booléenne aléatoire.\n\n",
-     ("fixed", ["False", "True"], ["Incorrect", "Vrai"])),
-    ("causal_judgment", "causal_judgement", "jugement_causal",
-     "Answer questions about causal attribution.\n\n",
-     "Répondez à des questions d'attribution causale.\n\n",
-     ("fixed", ["Yes", "No"], ["Oui", "Non"])),
-    ("date_understanding", "date_understanding", "compréhension_de_la_date",
-     "Infer the date from context.\n\n",
-     "Déduisez la date à partir du contexte.\n\n",
-     6),
-    ("disambiguation_qa", "disambiguation_qa", "désambiguïsation_qa",
-     "Clarify the meaning of sentences with ambiguous pronouns.\n\n",
-     "Clarifiez le sens de phrases contenant des pronoms ambigus.\n\n",
-     3),
-    ("dyck_languages", "dyck_languages", "dyck_languages",
-     "Correctly close a Dyck-n word.\n\n",
-     "Complétez correctement un mot de Dyck.\n\n",
-     "open"),
-    ("formal_fallacies", "formal_fallacies", "sophismes_formels",
-     "Distinguish deductively valid arguments from formal fallacies.\n\n",
-     "Distinguez les arguments déductivement valides des sophismes formels.\n\n",
-     ("fixed", ["valid", "invalid"], ["valide", "invalidee"])),
-    ("geometric_shapes", "geometric_shapes", "formes_géométriques",
-     "Name geometric shapes from their SVG paths.\n\n",
-     "Nommez les formes géométriques à partir de leur tracé SVG.\n\n",
-     11),
-    ("hyperbaton", "hyperbaton", "hyperbate",
-     "Order adjectives correctly in English sentences.\n\n",
-     "Ordonnez correctement les adjectifs dans des phrases.\n\n",
-     2),
-    ("logical_deduction_five_objects", "logical_deduction_five_objects", "déduction_logique_cinq_objets",
-     "A logical deduction task which requires deducing the order of a sequence of objects.\n\n",
-     "Une tâche de déduction logique qui consiste à déduire l'ordre d'une séquence d'objets.\n\n",
-     5),
-    ("logical_deduction_seven_objects", "logical_deduction_seven_objects", "déduction_logique_sept_objets",
-     "A logical deduction task which requires deducing the order of a sequence of objects.\n\n",
-     "Une tâche de déduction logique qui consiste à déduire l'ordre d'une séquence d'objets.\n\n",
-     7),
-    ("logical_deduction_three_objects", "logical_deduction_three_objects", "déduction_logique_trois_objets",
-     "A logical deduction task which requires deducing the order of a sequence of objects.\n\n",
-     "Une tâche de déduction logique qui consiste à déduire l'ordre d'une séquence d'objets.\n\n",
-     3),
-    ("movie_recommendation", "movie_recommendation", "recommandation_de_film",
-     "Recommend movies similar to the given list of movies.\n\n",
-     "Recommandez des films similaires à la liste de films donnée.\n\n",
-     6),
-    ("multistep_arithmetic_two", "multistep_arithmetic_two", "multistep_arithmetic_two",
-     "Solve multi-step arithmetic problems.\n\n",
-     "Résolvez des problèmes arithmétiques à plusieurs étapes.\n\n",
-     "open"),
-    ("navigate", "navigate", "naviguer",
-     "Given a series of navigation instructions, determine whether one would end up back at the starting point.\n\n",
-     "À partir d'une série d'instructions de navigation, déterminez si l'on revient au point de départ.\n\n",
-     ("fixed", ["Yes", "No"], ["Oui", "Non"])),
-    ("object_counting", "object_counting", "comptage_d_objets",
-     "Questions that involve enumerating objects and asking the model to count them.\n\n",
-     "Questions qui consistent à énumérer des objets et à les compter.\n\n",
-     "count"),
-    ("penguins_in_a_table", "penguins_in_a_table", "pingouins_sur_une_table",
-     "Answer questions about a table of penguins and their attributes.\n\n",
-     "Répondez à des questions sur un tableau de pingouins et leurs attributs.\n\n",
-     5),
-    ("reasoning_about_colored_objects", "reasoning_about_colored_objects", "raisonnement_sur_les_objets_colorés",
-     "Answer extremely simple questions about the colors of objects on a surface.\n\n",
-     "Répondez à des questions très simples sur la couleur d'objets posés sur une surface.\n\n",
-     18),
-    ("ruin_names", "ruin_names", "noms_de_ruines",
-     "Select the humorous edit that 'ruins' the input movie or musical artist name.\n\n",
-     "Choisissez la modification humoristique qui « gâche » le nom de film ou d'artiste donné.\n\n",
-     6),
-    ("salient_translation_error_detection", "salient_translation_error_detection",
-     "détection_d_erreur_de_traduction_sailante",
-     "Detect the type of error in an English translation of a German source sentence.\n\n",
-     "Détectez le type d'erreur dans la traduction d'une phrase source.\n\n",
-     6),
-    ("snarks", "snarks", "sarcasmes",
-     'Determine which of two sentences is sarcastic.\n\nAccording to Cambridge University Dictionary, sarcasm is "the use of remarks that clearly mean the opposite of what they say, made in order to hurt someone\'s feelings or to criticize something in a humorous way." Sarcastic sentences often contain satirical or ironic utterances, hyperboles, ambivalent or witty remarks.\n\n',
-     "Déterminez laquelle de deux phrases est sarcastique.\n\nLe sarcasme est l'emploi de remarques qui signifient clairement le contraire de ce qu'elles disent, dans le but de blesser ou de critiquer de manière humoristique. Les phrases sarcastiques contiennent souvent des propos satiriques ou ironiques, des hyperboles ou des remarques ambivalentes ou spirituelles.\n\n",
-     2),
-    ("sports_understanding", "sports_understanding", "compréhension_des_sports",
-     "Determine whether an artificially constructed sentence relating to sports is plausible or not.\n\n",
-     "Déterminez si une phrase construite artificiellement à propos du sport est plausible ou non.\n\n",
-     ("fixed", ["yes", "no"], ["Oui", "Non"])),
-    ("temporal_sequences", "temporal_sequences", "séquences_temporelles",
-     "Task description: Answer questions about which times certain events could have occurred.\n\n",
-     "Description de la tâche : répondez à des questions sur les moments où certains événements ont pu se produire.\n\n",
-     4),
-    ("tracking_shuffled_objects_five_objects", "tracking_shuffled_objects_five_objects",
-     "suivi_objets_mélangés_cinq_objets",
-     "A task requiring determining the final positions of a set of objects given their initial positions and a description of a sequence of swaps.\n\n",
-     "Une tâche consistant à déterminer les positions finales d'un ensemble d'objets à partir de leurs positions initiales et d'une séquence d'échanges.\n\n",
-     5),
-    ("tracking_shuffled_objects_seven_objects", "tracking_shuffled_objects_seven_objects",
-     "suivi_objets_mélangés_sept_objets",
-     "A task requiring determining the final positions of a set of objects given their initial positions and a description of a sequence of swaps.\n\n",
-     "Une tâche consistant à déterminer les positions finales d'un ensemble d'objets à partir de leurs positions initiales et d'une séquence d'échanges.\n\n",
-     7),
-    ("tracking_shuffled_objects_three_objects", "tracking_shuffled_objects_three_objects",
-     "suivi_objets_mélangés_trois_objets",
-     "A task requiring determining the final positions of a set of objects given their initial positions and a description of a sequence of swaps.\n\n",
-     "Une tâche consistant à déterminer les positions finales d'un ensemble d'objets à partir de leurs positions initiales et d'une séquence d'échanges.\n\n",
-     3),
-    ("web_of_lies", "web_of_lies", "toile_de_mensonges",
-     "Evaluate a random boolean function expressed as a word problem.\n\n",
-     "Évaluez une fonction booléenne aléatoire exprimée sous forme de problème.\n\n",
-     ("fixed", ["Yes", "No"], ["Oui", "Non"])),
-    ("word_sorting", "word_sorting", "tri_de_mots",
-     "Sort a list of words.\n\n",
-     "Triez une liste de mots.\n\n",
-     "open"),
+# ---------------------------------------------------------------------------
+# Robust answer extraction & matching.
+#
+# A bare "exact match on the text after 'the answer is'" throws away most correct
+# answers from real (small, chatty, instruction-tuned) models: they wrap the answer
+# in markdown, use a different cue ("Réponse finale :"), omit the cue entirely, or add
+# trailing notes. This extractor recovers the *final committed answer* and matches it
+# tolerantly, WITHOUT rescuing genuine non-answers/self-contradiction (it always takes
+# the last cue, then the first token of that answer span — like lm-eval's flexible
+# regex-after-final-cue). It is language- and model-agnostic (FR + EN cues, extensible).
+#
+# Kept in sync with the standalone prototype + unit tests under ``tmp/bbh_extractor/``;
+# intended to later move into lighteval core as a shared BBH metric.
+# ---------------------------------------------------------------------------
+
+# Answer-introducing cues, matched case-insensitively; the LAST occurrence wins.
+_CUES = [
+    "la bonne réponse est",
+    "la réponse correcte est",
+    "la réponse finale est",
+    "réponse finale :",
+    "réponse finale",
+    "la réponse est",
+    "réponse correcte :",
+    "réponse est :",
+    "réponse est",
+    "réponse :",
+    "réponse:",
+    "the correct answer is",
+    "the final answer is",
+    "final answer:",
+    "final answer",
+    "the answer is",
+    "answer is",
+    "answer:",
+    "so the answer is",
 ]
-# fmt: on
+
+_QUOTES = "\"'“”«»‹›`"
+
+# Equivalence classes: gold label <-> what models actually write (FR/EN synonyms).
+_CLASSES = {
+    "yes": {"oui", "yes", "y", "o", "vrai", "true", "plausible"},
+    "no": {"non", "no", "n", "faux", "false", "pas plausible", "non plausible", "implausible"},
+    "true": {"vrai", "true", "correct", "oui", "yes"},
+    "false": {"incorrect", "faux", "false", "non", "no"},
+    "valid": {"valide", "valid", "déductivement valide"},
+    "invalid": {"invalide", "invalid", "non valide", "not valid", "invalidee", "sophisme", "fallacy"},
+}
 
 
-def _make_task(name, hf_repo, hf_subset, instruction, choices_spec, lang):
+def _strip_markdown(s: str) -> str:
+    s = s.replace("**", "").replace("__", "").replace("`", "")
+    s = s.replace("###", " ").replace("##", " ")
+    s = re.sub(r"(?<![\w*])\*(?!\*)", "", s)
+    s = s.replace("✅", " ").replace("→", " ")
+    return s
+
+
+def _norm(s) -> str:
+    """Normalise a short answer span for comparison: strip markdown/quotes/punct, lowercase."""
+    s = _strip_markdown(str(s))
+    s = re.sub(r"\s+", " ", s).strip()
+    s = s.strip(_QUOTES + " .:;!?)(").strip()
+    return s.lower()
+
+
+def _gold_type(gold: str):
+    g = _norm(gold)
+    if re.fullmatch(r"\(?[a-z]\)?", g):
+        return "letter", re.sub(r"[()]", "", g)
+    if re.fullmatch(r"-?\d+", g):
+        return "number", g
+    if g in ("oui", "non"):
+        return "yesno", g
+    if g in ("vrai", "incorrect"):
+        return "boolean", g
+    if g in ("valide", "invalide"):
+        return "validity", g
+    if re.fullmatch(r"[\[\](){}<>\s]+", g):
+        return "brackets", g
+    return "freeform", g
+
+
+def _clean_line(ln: str) -> str:
+    """Drop leading colon and surrounding whitespace, but keep signs/brackets (e.g. '-26', ']')."""
+    return ln.strip().lstrip(":").strip()
+
+
+def _answer_segment(pred: str):
+    """Text after the LAST answer cue: the same-line tail, else the next non-empty line."""
+    text = _strip_markdown(pred)
+    low = text.lower()
+    best_idx, best_cue = -1, None
+    for cue in _CUES:
+        i = low.rfind(cue)
+        if i > best_idx:
+            best_idx, best_cue = i, cue
+    if best_idx == -1:
+        return None
+    lines = text[best_idx + len(best_cue) :].split("\n")
+    if _clean_line(lines[0]):
+        return _clean_line(lines[0])
+    for ln in lines[1:]:
+        s = _clean_line(ln)
+        if s and not s.startswith("```"):
+            return s
+    return ""
+
+
+def _last_nonempty_line(pred: str) -> str:
+    lines = [ln.strip() for ln in _strip_markdown(pred).splitlines() if ln.strip()]
+    return lines[-1] if lines else ""
+
+
+def _parse_options(query):
+    """Map option letter <-> text from the *test question's* (last) 'Options' block only."""
+    if not query:
+        return {}, {}
+    idx = query.lower().rfind("options")
+    scope = query[idx:] if idx != -1 else query
+    letter2text, text2letter = {}, {}
+    for m in re.finditer(r"\(([A-Za-z])\)\s*([^\n]+)", scope):
+        letter, text = m.group(1).lower(), _norm(m.group(2))
+        if text:
+            letter2text[letter] = text
+            text2letter.setdefault(text, letter)
+    return letter2text, text2letter
+
+
+def _find_letter(segment, whole, query):
+    letter2text, text2letter = _parse_options(query)
+    if segment:  # FIRST (X) in the answer segment = the committed answer
+        m = re.findall(r"\(([A-Za-z])\)", segment)
+        if m:
+            return m[0].lower()
+        seg = _norm(segment)  # option TEXT stated without a letter -> map back
+        for text in sorted(text2letter, key=len, reverse=True):
+            if text and text in seg:
+                return text2letter[text]
+        m = re.search(r"\b([a-z])\b", seg)  # bare letter e.g. "réponse est b"
+        if m and m.group(1) in letter2text:
+            return m.group(1)
+    letters = re.findall(r"\(([A-Za-z])\)", whole or "")  # fallback: last (X) anywhere
+    return letters[-1].lower() if letters else None
+
+
+def _first_in(text, classes):
+    t = _norm(text)
+    best_c, best_pos = None, len(t) + 1
+    for c in classes:
+        for member in _CLASSES[c]:
+            m = re.search(rf"(?<![a-zà-ÿ]){re.escape(member)}(?![a-zà-ÿ])", t)
+            if m and m.start() < best_pos:
+                best_pos, best_c = m.start(), c
+    return best_c
+
+
+def _last_in(text, classes):
+    t = _norm(text)
+    best_c, best_pos = None, -1
+    for c in classes:
+        for member in _CLASSES[c]:
+            for m in re.finditer(rf"(?<![a-zà-ÿ]){re.escape(member)}(?![a-zà-ÿ])", t):
+                if m.start() > best_pos:
+                    best_pos, best_c = m.start(), c
+    return best_c
+
+
+def _find_class(segment, whole, classes):
+    """Committed class = FIRST class member in the segment; else LAST in the whole text."""
+    if segment:
+        c = _first_in(segment, classes)
+        if c:
+            return c
+    return _last_in(whole, classes) if whole else None
+
+
+def _find_number(segment, whole):
+    if segment:
+        nums = re.findall(r"-?\d+", segment.replace(" ", ""))
+        if nums:
+            return nums[0]
+    nums = re.findall(r"-?\d+", (whole or "").replace(" ", ""))
+    return nums[-1] if nums else None
+
+
+def _token_seq(s) -> str:
+    """Separator-agnostic token sequence (commas/semicolons/slashes -> spaces) for free-form answers."""
+    return re.sub(r"\s+", " ", re.sub(r"[,;/]", " ", _norm(s))).strip()
+
+
+def _robust_match(prediction: str, gold: str, query=None) -> float:
+    """1.0 if the prediction's final committed answer matches gold, else 0.0."""
+    gtype, gnorm = _gold_type(gold)
+    segment = _answer_segment(prediction)
+    had_cue = segment is not None
+    seg_or_line = segment if had_cue else _last_nonempty_line(prediction)
+    # Whole-text fallback is only trusted when the model signalled an answer with a cue,
+    # so a degenerate ramble can't be rescued by a stray letter mid-reasoning.
+    whole = prediction if had_cue else ""
+
+    if gtype == "letter":
+        ok = _find_letter(seg_or_line, whole, query) == gnorm
+    elif gtype == "number":
+        ok = _find_number(seg_or_line, whole) == gnorm
+    elif gtype in ("yesno", "boolean", "validity"):
+        classes = {"yesno": ["yes", "no"], "boolean": ["true", "false"], "validity": ["valid", "invalid"]}[gtype]
+        gold_class = {
+            "oui": "yes",
+            "non": "no",
+            "vrai": "true",
+            "incorrect": "false",
+            "valide": "valid",
+            "invalide": "invalid",
+        }[gnorm]
+        ok = _find_class(seg_or_line, whole, classes) == gold_class
+    elif gtype == "brackets":
+        pv = re.sub(r"[^\[\](){}<>]", "", seg_or_line or "")
+        ok = bool(pv) and pv == re.sub(r"[^\[\](){}<>]", "", gnorm)
+    else:  # freeform (e.g. word_sorting): separator-agnostic token sequence
+        ok = _token_seq(seg_or_line) == _token_seq(gnorm)
+    return 1.0 if ok else 0.0
+
+
+class BBHCotExactMatch(SampleLevelComputation):
+    """Robustly extract the CoT generation's final committed answer and match it against gold."""
+
+    def compute(self, model_response, doc, **kwargs) -> float:
+        pred = model_response.text[0] if getattr(model_response, "text", None) else ""
+        return _robust_match(pred, doc.choices[0], getattr(doc, "query", None))
+
+
+_METRIC = SampleLevelMetric(
+    metric_name="em",
+    sample_level_fn=BBHCotExactMatch(),
+    category=SamplingMethod.GENERATIVE,
+    corpus_level_fn=np.mean,
+    higher_is_better=True,
+)
+
+
+def _make_task(name, hf_repo, hf_subset, prompt_fn):
     return LightevalTaskConfig(
         name=name,
         suite=["community"],
-        prompt_function=_make_bbh_prompt(instruction, _choices_fn(choices_spec, lang)),
+        prompt_function=prompt_fn,
         hf_repo=hf_repo,
         hf_subset=hf_subset,
         hf_avail_splits=["test"],
         evaluation_splits=["test"],
-        few_shots_split=None,
+        few_shots_split=None,  # the 3-shot CoT is baked into the prompt; do not sample
         few_shots_select=None,
         generation_size=GENERATION_SIZE,
-        metrics=BBH_METRICS,
+        metrics=[_METRIC],
         stop_sequence=STOP_SEQUENCE,
-        version=0,
+        version=1,  # v1: robust answer extraction (was strict marker exact-match)
     )
 
 
+# English tasks: one per demonstration set available (all 27 from lm-eval).
+BBH_EN_TASKS = [_make_task(f"bbh:{key}", EN_REPO, key, _make_cot_prompt(key, "en")) for key in _DEMOS["en"]]
+
+# French tasks: one per demonstration set available in the French file.
 BBH_FR_TASKS = [
-    _make_task(f"bbh_fr:{key}", "le-leadboard/bbh-fr", fr_subset, fr_instr, spec, "fr")
-    for key, en_subset, fr_subset, en_instr, fr_instr, spec in BBH_TASKS
+    _make_task(f"bbh_fr:{key}", FR_REPO, FR_SUBSET[key], _make_cot_prompt(key, "fr"))
+    for key in _DEMOS["fr"]
+    if key in FR_SUBSET
 ]
 
 
-TASKS_TABLE = BBH_FR_TASKS
+TASKS_TABLE = BBH_EN_TASKS + BBH_FR_TASKS
