@@ -436,6 +436,7 @@ class VLLMModel(LightevalModel):
         """
         self.model_args = {
             "model": config.model_name,
+            "tokenizer_mode": os.environ.get("LIGHTEVAL_TOKENIZER_MODE", "auto"),
             "gpu_memory_utilization": config.gpu_memory_utilization,
             "enable_prefix_caching": config.enable_prefix_caching,
             "revision": config.revision + (f"/{config.subfolder}" if config.subfolder is not None else ""),
@@ -451,6 +452,12 @@ class VLLMModel(LightevalModel):
             "max_num_batched_tokens": int(config.max_num_batched_tokens),
             "enforce_eager": True,
         }
+        if os.environ.get("LIGHTEVAL_LIMIT_MM_IMAGE"):
+            self.model_args["limit_mm_per_prompt"] = {"image": int(os.environ["LIGHTEVAL_LIMIT_MM_IMAGE"])}
+        _hfo = os.environ.get("LIGHTEVAL_HF_OVERRIDES")
+        if _hfo:
+            import json as _json
+            self.model_args.setdefault("hf_overrides", {}).update(_json.loads(_hfo))
         if self._max_length:
             self.model_args["hf_overrides"] = {"max_position_embeddings": self._max_length}
 
@@ -860,6 +867,7 @@ class AsyncVLLMModel(VLLMModel):
         """
         self.model_args = {
             "model": config.model_name,
+            "tokenizer_mode": os.environ.get("LIGHTEVAL_TOKENIZER_MODE", "auto"),
             "gpu_memory_utilization": config.gpu_memory_utilization,
             "revision": config.revision + (f"/{config.subfolder}" if config.subfolder is not None else ""),
             "dtype": config.dtype,
@@ -877,6 +885,12 @@ class AsyncVLLMModel(VLLMModel):
         }
         if config.max_images is not None:
             self.model_args["limit_mm_per_prompt"] = {"image": config.max_images}
+        if os.environ.get("LIGHTEVAL_LIMIT_MM_IMAGE"):
+            self.model_args["limit_mm_per_prompt"] = {"image": int(os.environ["LIGHTEVAL_LIMIT_MM_IMAGE"])}
+        _hfo = os.environ.get("LIGHTEVAL_HF_OVERRIDES")
+        if _hfo:
+            import json as _json
+            self.model_args.setdefault("hf_overrides", {}).update(_json.loads(_hfo))
 
         if config.data_parallel_size > 1:
             self._batch_size = "auto"
