@@ -110,7 +110,7 @@ def test_false_refusal_and_refusal_recall_keep_false_as_zero():
         ("No, they were not.", "no", 1.0),
         ("Net sales were <quote>157,133</quote>.", "157,133", 1.0),
         ('Paid when amounts fall due<ref name="source_1">quote</ref>.', "when amounts fall due", 1.0),
-        ("Accrued revenue was $5,824,000.", "5,824", 1.0),
+        ("Accrued revenue was $5,824,000.", "5,824", 0.0),
         ("The grant was 5 million dollars.", "5,000,000", 1.0),
         ("The adjustment was $500,000.", "$0.5 million", 1.0),
         ("The ratio was 12.3.", "1.23", 0.0),
@@ -121,6 +121,47 @@ def test_false_refusal_and_refusal_recall_keep_false_as_zero():
 )
 def test_answer_em_matches_whole_words_only(response, gold, expected):
     assert luciole_rag.compute_answer_em(response, gold) == expected
+
+
+@pytest.mark.parametrize(
+    ("response", "gold", "language", "expected"),
+    [
+        ("There were 5000 people.", "5", "en", 0.0),
+        ("The amount was 5 dollars.", "5 million", "en", 0.0),
+        ("The amount was $5,824,000.", "5.824 million", "en", 1.0),
+        ("The amount was $5,824,000.", "5,824 thousand", "en", 1.0),
+        ("The change was +5%.", "-5", "en", 0.0),
+        ("The change was -5%.", "5", "en", 0.0),
+        ("The change was −5%.", "-5", "en", 1.0),
+        ("The loss was -$5 million.", "-5000000", "en", 1.0),
+        ("The loss was $-5 million.", "-5000000", "en", 1.0),
+        ("The loss was ($5 million).", "-5000000", "en", 1.0),
+        ("The amount was $5 million.", "(5000000)", "en", 0.0),
+        ("The value is 5.2.", "2", "en", 0.0),
+        ("La valeur est 1,23.", "23", "fr", 0.0),
+        ("La valeur est 1,23.", "1.23", "fr", 1.0),
+        ("La valeur est 1,234.", "1.234", "fr", 1.0),
+        ("The value is 1,234.", "1234", "en", 1.0),
+        ("Le montant est 1 234,56 €.", "1234.56", "fr", 1.0),
+        ("Le montant est 1\u00a0234,56 €.", "1234.56", "fr", 1.0),
+        ("Le montant est 1\u202f234,56 €.", "1234.56", "fr", 1.0),
+        ("Le montant est 1.234,56 €.", "1234.56", "fr", 1.0),
+        ("The amount is $1,234.56.", "1234.56", "en", 1.0),
+        ("Le montant est 0,5 million €.", "500000", "fr", 1.0),
+        ("Le montant est 2 milliards €.", "2000000000", "fr", 1.0),
+        ("La variation est -1,23 %.", "1,23", "fr", 0.0),
+        ("La variation est -1,23 %.", "-1,23", "fr", 1.0),
+        ("The amount is 0.", "0.000000001", "en", 0.0),
+    ],
+)
+def test_answer_em_numeric_values(response, gold, language, expected):
+    assert luciole_rag.compute_answer_em(response, gold, language=language) == expected
+
+
+def test_sample_metrics_use_document_language_for_numbers():
+    doc = SimpleNamespace(specific={"reference_answer": "1.234", "language": "fr"})
+    response = SimpleNamespace(final_text=["La valeur est 1,234."])
+    assert luciole_rag.LucioleRagSampleMetrics().compute(response, doc)["answer_em"] == 1.0
 
 
 def test_citation_f1_is_zero_when_expected_sources_are_not_cited():

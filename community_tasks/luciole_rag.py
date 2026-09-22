@@ -297,49 +297,72 @@ _SCALE_WORDS = {
     "bn": 1e9,
     "billion": 1e9,
     "billions": 1e9,
+    "mille": 1e3,
+    "millier": 1e3,
+    "milliers": 1e3,
+    "milliard": 1e9,
+    "milliards": 1e9,
 }
-_SCALE_WORD_PATTERN = r"thousands?|millions?|billions?|bn|mn|m|k"
-# A number with optional thousands separators, decimals and scale word
-# ("5,824,000", "0.486 million", "$17.7m"). Signs are ignored, as
-# normalize_answer ignores them for text golds.
+_SCALE_WORD_PATTERN = r"thousands?|millions?|billions?|milliards?|milliers?|mille|bn|mn|m|k"
+# Consume the entire numeric token before interpreting separators, so a
+# decimal's fractional part cannot be credited as a separate integer.
+_NUMBER_PATTERN = (
+    rf"(?P<open>\()?\s*(?P<sign>[+−-])?\s*[$€£]?\s*"
+    rf"(?P<currency_sign>[+−-])?\s*"
+    rf"(?P<number>\d+(?:[.,]\d+|[ \u00a0\u202f]\d{{3}}(?!\d))*)"
+    rf"(?:\s*(?P<scale>{_SCALE_WORD_PATTERN})\b)?"
+    rf"\s*(?P<close>\))?\s*%?\s*[$€£]?"
+)
 _NUMBER_RE = re.compile(
-    rf"(?<![\w.])(\d{{1,3}}(?:,\d{{3}})+|\d+)(\.\d+)?(?:\s*({_SCALE_WORD_PATTERN})\b)?",
+    rf"(?<![\w.,+−-]){_NUMBER_PATTERN}(?!\w|[.,]\d)",
     re.IGNORECASE,
 )
-_NUMERIC_GOLD_RE = re.compile(
-    rf"^[\s$€£(-]*(\d{{1,3}}(?:,\d{{3}})+|\d+)(\.\d+)?\s*({_SCALE_WORD_PATTERN})?\s*\)?\s*%?\s*$",
-    re.IGNORECASE,
-)
-# A numeric gold matches the same value at any of these relative scales:
-# TAT-QA golds are stated in the table's unit ("5,824" in a table "in
-# thousands"), which models often expand ("$5,824,000") or rescale
-# ("$5.8 million" does not match, "$5.824 million" does).
-_SCALE_FACTORS = (1.0, 1e3, 1e6, 1e9, 1e-3, 1e-6, 1e-9)
+_NUMERIC_GOLD_RE = re.compile(_NUMBER_PATTERN, re.IGNORECASE)
 
 
-def _number_value(integer: str, decimals: str | None, scale: str | None) -> float:
-    value = float(integer.replace(",", "") + (decimals or ""))
-    return value * _SCALE_WORDS.get((scale or "").lower(), 1.0)
+def _number_value(match: re.Match, language: str) -> float | None:
+    number = re.sub(r"[ \u00a0\u202f]", "", match["number"])
+    if "," in number and "." in number:
+        # The last separator is decimal: 1,234.56 / 1.234,56.
+        decimal = "," if number.rfind(",") > number.rfind(".") else "."
+        grouping = "." if decimal == "," else ","
+        integer, fraction = number.rsplit(decimal, 1)
+        if not re.fullmatch(rf"\d{{1,3}}(?:{re.escape(grouping)}\d{{3}})+", integer):
+            return None
+        number = integer.replace(grouping, "") + "." + fraction
+    elif "," in number:
+        if language != "fr" and re.fullmatch(r"\d{1,3}(?:,\d{3})+", number):
+            number = number.replace(",", "")
+        else:
+            number = number.replace(",", ".")
+    if not re.fullmatch(r"\d+(?:\.\d+)?", number):
+        return None
+    if match["sign"] and match["currency_sign"]:
+        return None
+    sign = match["sign"] or match["currency_sign"]
+    negative = sign in ("-", "−") or bool(match["open"] and match["close"])
+    value = float(number) * (-1 if negative else 1)
+    return value * _SCALE_WORDS.get((match["scale"] or "").lower(), 1.0)
 
 
-def _numeric_gold_value(gold_answer: str) -> float | None:
+def _numeric_gold_value(gold_answer: str, language: str = "en") -> float | None:
     """Value of a gold that is a single number, else None."""
-    m = _NUMERIC_GOLD_RE.match(gold_answer)
-    return _number_value(*m.groups()) if m else None
+    m = _NUMERIC_GOLD_RE.fullmatch(gold_answer.strip())
+    return _number_value(m, language) if m else None
 
 
 def _values_close(a: float, b: float) -> bool:
-    # Purely relative: an absolute floor would let a gold scaled by 1e-9
-    # match any "0" in the response.
+    # Purely relative: small nonzero values must not match zero.
     return abs(a - b) <= 1e-9 * max(abs(a), abs(b))
 
 
-def compute_answer_em(response: str, gold_answer: str) -> float:
+def compute_answer_em(response: str, gold_answer: str, *, language: str = "en") -> float:
     """1.0 when the response contains the gold answer, else 0.0.
 
-    A gold that is a single number matches when the response states the
-    same value, at any scale in ``_SCALE_FACTORS``: "5,824" (thousands)
-    matches "$5,824,000", "5,000,000" matches "5 million". Other golds
+    Numeric golds match signed values with explicit scale words:
+    "5,000,000" matches "5 million", but "5" does not match "5000".
+    Implicit table units are not inferred. Language resolves ambiguous
+    separators such as "1,234" (1234 in EN, 1.234 in FR). Other golds
     match when their normalized text appears in the normalized response as
     a whole-word sequence. Both avoid the bare substring test, which
     credited gold "no" inside "not"/"cannot" (so refusals scored on yes/no
@@ -348,10 +371,10 @@ def compute_answer_em(response: str, gold_answer: str) -> float:
     if not gold_answer:
         return 0.0
     response = _strip_markup(response)
-    gold_value = _numeric_gold_value(gold_answer)
+    gold_value = _numeric_gold_value(gold_answer, language)
     if gold_value is not None:
-        values = [_number_value(*m.groups()) for m in _NUMBER_RE.finditer(response)]
-        hit = any(_values_close(v, gold_value * f) for v in values for f in _SCALE_FACTORS)
+        values = [_number_value(m, language) for m in _NUMBER_RE.finditer(response)]
+        hit = any(v is not None and _values_close(v, gold_value) for v in values)
         return 1.0 if hit else 0.0
     norm_pred = normalize_answer(response)
     norm_gold = normalize_answer(gold_answer)
@@ -741,7 +764,7 @@ class LucioleRagSampleMetrics(SampleLevelComputation):
 
         cited = extract_cited_titles(response_text)
 
-        answer_em = compute_answer_em(response_text, reference_answer)
+        answer_em = compute_answer_em(response_text, reference_answer, language=spec.get("language", "en"))
         answer_em_fuzzy = compute_answer_em_fuzzy(response_text, reference_answer)
         precision_strict, recall_strict, citation_f1_strict = evaluate_citations(cited, gold_titles)
         precision_fuzzy, recall_fuzzy, citation_f1_fuzzy = evaluate_citations(cited, gold_titles, fuzzy=True)
@@ -1033,10 +1056,7 @@ Reply with ONLY a JSON object (no other text):
 
 
 def build_refusal_judge_messages(question, answer, options, gold, **kwargs) -> list[dict]:
-    user_content = (
-        f"**Question:**\n{question}\n\n"
-        f"**Assistant response:**\n{answer}"
-    )
+    user_content = f"**Question:**\n{question}\n\n**Assistant response:**\n{answer}"
     return [
         {"role": "system", "content": JUDGE_REFUSAL_SYSTEM_PROMPT},
         {"role": "user", "content": user_content},
