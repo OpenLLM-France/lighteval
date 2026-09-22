@@ -794,17 +794,17 @@ You are an impartial factual evaluator. You will be given:
 2. A **correct answer** (ground truth).
 3. The **supporting facts** (the specific document titles that contain the evidence needed to answer the question).
 4. A **context** (retrieved documents).
-5. A **reasoning trace** produced by an AI assistant.
+5. The **response** of an AI assistant. It is the final answer only: any reasoning trace has been removed, so do not expect the response to explain its steps.
 
-Your task is to rate the **factual correctness and faithfulness** of the reasoning trace on a scale from 1 to 5:
+Your task is to rate the **factual correctness and faithfulness** of the response on a scale from 1 to 5:
 
-- **1**: The final answer is wrong AND the reasoning does not use the correct supporting facts at all.
-- **2**: The final answer is wrong, but the reasoning references some of the correct supporting facts; OR the answer is partially right but the reasoning is based on wrong evidence.
-- **3**: The final answer is approximately correct but imprecise, or the reasoning misses one of the key supporting facts, or the reasoning contains a factual error despite reaching the right answer.
-- **4**: The final answer is correct and the reasoning uses most of the supporting facts properly, with only minor omissions or imprecisions.
-- **5**: The final answer is correct, the reasoning correctly identifies and uses all the supporting facts, and the logical chain from evidence to answer is flawless.
+- **1**: The answer is wrong AND is not supported by the context.
+- **2**: The answer is wrong, though it draws on some of the relevant evidence; OR the answer is partially right but rests on wrong evidence.
+- **3**: The answer is approximately correct but imprecise or incomplete, or it states a right answer alongside a factual error or a claim the context does not support.
+- **4**: The answer is correct and supported by the context, with only minor imprecisions or omissions.
+- **5**: The answer is correct and complete, and every claim the response makes is supported by the context.
 
-Also report whether the reasoning trace is in fact a **REFUSAL / abstention** — the
+Also report whether the response is in fact a **REFUSAL / abstention** — the
 assistant declined to answer, or stated the information is not in the documents —
 instead of a genuine attempt to answer. This question IS answerable from the
 context, so a refusal here is an unwanted **false refusal**. A refusal may be
@@ -825,7 +825,7 @@ def build_factual_judge_messages(question, answer, options, gold, **kwargs) -> l
         f"**Correct answer:**\n{gold or ''}\n\n"
         f"**Supporting facts (document titles):**\n{sf_text}\n\n"
         f"**Context:**\n{context}\n\n"
-        f"**Reasoning trace:**\n{answer}"
+        f"**Response:**\n{answer}"
     )
     return [
         {"role": "system", "content": JUDGE_FACTUAL_SYSTEM_PROMPT},
