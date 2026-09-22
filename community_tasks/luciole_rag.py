@@ -370,7 +370,10 @@ def compute_answer_em(response: str, gold_answer: str, *, language: str = "en") 
     """
     if not gold_answer:
         return 0.0
-    response = _strip_markup(response)
+    # Collapse whitespace runs: _NUMBER_PATTERN chains several optional \s*,
+    # which backtrack polynomially on long runs, such as the spaces left by
+    # stripping a degenerate "<br> <br> <br> ..." loop.
+    response = " ".join(_strip_markup(response).split())
     gold_value = _numeric_gold_value(gold_answer, language)
     if gold_value is not None:
         values = [_number_value(m, language) for m in _NUMBER_RE.finditer(response)]

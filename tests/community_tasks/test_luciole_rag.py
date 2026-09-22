@@ -167,3 +167,12 @@ def test_sample_metrics_use_document_language_for_numbers():
 def test_citation_f1_is_zero_when_expected_sources_are_not_cited():
     assert luciole_rag.evaluate_citations([], ["source"]) == (None, 0.0, 0.0)
     assert luciole_rag.evaluate_citations([], []) == (None, None, None)
+
+
+def test_answer_em_stays_fast_on_degenerate_markup_loops():
+    import time
+
+    response = "A decrease of $4,001,000" + " <br>" * 2000
+    start = time.perf_counter()
+    assert luciole_rag.compute_answer_em(response, "4,001,000") == 1.0
+    assert time.perf_counter() - start < 1.0
