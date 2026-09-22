@@ -280,17 +280,78 @@ def _strip_markup(text: str) -> str:
     return _MARKUP_TAG_RE.sub(" ", text)
 
 
+_SCALE_WORDS = {
+    "k": 1e3,
+    "thousand": 1e3,
+    "thousands": 1e3,
+    "m": 1e6,
+    "mn": 1e6,
+    "million": 1e6,
+    "millions": 1e6,
+    "bn": 1e9,
+    "billion": 1e9,
+    "billions": 1e9,
+}
+_SCALE_WORD_PATTERN = r"thousands?|millions?|billions?|bn|mn|m|k"
+# A number with optional thousands separators, decimals and scale word
+# ("5,824,000", "0.486 million", "$17.7m"). Signs are ignored, as
+# normalize_answer ignores them for text golds.
+_NUMBER_RE = re.compile(
+    rf"(?<![\w.])(\d{{1,3}}(?:,\d{{3}})+|\d+)(\.\d+)?(?:\s*({_SCALE_WORD_PATTERN})\b)?",
+    re.IGNORECASE,
+)
+_NUMERIC_GOLD_RE = re.compile(
+    rf"^[\s$€£(-]*(\d{{1,3}}(?:,\d{{3}})+|\d+)(\.\d+)?\s*({_SCALE_WORD_PATTERN})?\s*\)?\s*%?\s*$",
+    re.IGNORECASE,
+)
+# A numeric gold matches the same value at any of these relative scales:
+# TAT-QA golds are stated in the table's unit ("5,824" in a table "in
+# thousands"), which models often expand ("$5,824,000") or rescale
+# ("$5.8 million" does not match, "$5.824 million" does).
+_SCALE_FACTORS = (1.0, 1e3, 1e6, 1e9, 1e-3, 1e-6, 1e-9)
+
+
+def _number_value(integer: str, decimals: str | None, scale: str | None) -> float:
+    value = float(integer.replace(",", "") + (decimals or ""))
+    return value * _SCALE_WORDS.get((scale or "").lower(), 1.0)
+
+
+def _numeric_gold_value(gold_answer: str) -> float | None:
+    """Value of a gold that is a single number, else None."""
+    m = _NUMERIC_GOLD_RE.match(gold_answer)
+    return _number_value(*m.groups()) if m else None
+
+
+def _values_close(a: float, b: float) -> bool:
+    # Purely relative: an absolute floor would let a gold scaled by 1e-9
+    # match any "0" in the response.
+    return abs(a - b) <= 1e-9 * max(abs(a), abs(b))
+
+
 def compute_answer_em(response: str, gold_answer: str) -> float:
-    """1.0 when the normalized gold answer appears as a substring of the
-    normalized response, else 0.0.
+    """1.0 when the response contains the gold answer, else 0.0.
+
+    A gold that is a single number matches when the response states the
+    same value, at any scale in ``_SCALE_FACTORS``: "5,824" (thousands)
+    matches "$5,824,000", "5,000,000" matches "5 million". Other golds
+    match when their normalized text appears in the normalized response as
+    a whole-word sequence. Both avoid the bare substring test, which
+    credited gold "no" inside "not"/"cannot" (so refusals scored on yes/no
+    questions) and gold "5" inside "85".
     """
     if not gold_answer:
         return 0.0
-    norm_pred = normalize_answer(_strip_markup(response))
+    response = _strip_markup(response)
+    gold_value = _numeric_gold_value(gold_answer)
+    if gold_value is not None:
+        values = [_number_value(*m.groups()) for m in _NUMBER_RE.finditer(response)]
+        hit = any(_values_close(v, gold_value * f) for v in values for f in _SCALE_FACTORS)
+        return 1.0 if hit else 0.0
+    norm_pred = normalize_answer(response)
     norm_gold = normalize_answer(gold_answer)
     if not norm_gold:
         return 0.0
-    return 1.0 if norm_gold in norm_pred else 0.0
+    return 1.0 if re.search(rf"(?<!\w){re.escape(norm_gold)}(?!\w)", norm_pred) else 0.0
 
 
 _FUZZY_EM_THRESHOLD = 0.80

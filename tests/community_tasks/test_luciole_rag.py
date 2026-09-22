@@ -100,3 +100,24 @@ def test_false_refusal_and_refusal_recall_keep_false_as_zero():
     assert factual["false_refusal_judge"] == 0.0
     assert refusal["refusal_judge_recall"] == 0.0
     assert luciole_rag._nanmean_skip_none_with_stderr("metric")([None, 0.0])["metric"] == 0.0
+
+
+@pytest.mark.parametrize(
+    ("response", "gold", "expected"),
+    [
+        ("The provided documents do not allow me to answer this question.", "no", 0.0),
+        ("Revenue rose from 80 million to 85 million.", "5", 0.0),
+        ("No, they were not.", "no", 1.0),
+        ("Net sales were <quote>157,133</quote>.", "157,133", 1.0),
+        ('Paid when amounts fall due<ref name="source_1">quote</ref>.', "when amounts fall due", 1.0),
+        ("Accrued revenue was $5,824,000.", "5,824", 1.0),
+        ("The grant was 5 million dollars.", "5,000,000", 1.0),
+        ("The adjustment was $500,000.", "$0.5 million", 1.0),
+        ("The ratio was 12.3.", "1.23", 0.0),
+        ("The adjustment was $5.8 million.", "5,824", 0.0),
+        ("Nonvested awards were $0.", "67.6", 0.0),
+        ("The change was 0%.", "0", 1.0),
+    ],
+)
+def test_answer_em_matches_whole_words_only(response, gold, expected):
+    assert luciole_rag.compute_answer_em(response, gold) == expected
