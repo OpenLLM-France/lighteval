@@ -696,7 +696,6 @@ _SAMPLE_METRIC_NAMES = [
     "citation_precision_fuzzy",
     "citation_recall_fuzzy",
     "citation_f1_fuzzy",
-    "distractor_citation_rate",
     "refusal_format_compliance",
     "refusal_format_precision",
     "false_refusal_format_rate",
@@ -735,7 +734,6 @@ class LucioleRagSampleMetrics(SampleLevelComputation):
                 "citation_precision_fuzzy": None,
                 "citation_recall_fuzzy": None,
                 "citation_f1_fuzzy": None,
-                "distractor_citation_rate": None,
                 "refusal_format_compliance": 1.0 if refused else 0.0,
                 "refusal_format_precision": 1.0 if refused else None,
                 "false_refusal_format_rate": None,
@@ -748,12 +746,6 @@ class LucioleRagSampleMetrics(SampleLevelComputation):
         precision_strict, recall_strict, citation_f1_strict = evaluate_citations(cited, gold_titles)
         precision_fuzzy, recall_fuzzy, citation_f1_fuzzy = evaluate_citations(cited, gold_titles, fuzzy=True)
 
-        # Distractor: any cited title that does not exactly match a gold
-        # supporting fact. Includes both wrong-but-real chunks and
-        # hallucinated titles that aren't in the context at all.
-        cited_distractor_count = sum(1 for c in cited if not any(_citation_match(c, g) for g in gold_titles))
-        distractor_rate = cited_distractor_count / len(cited) if cited else 0.0
-
         return {
             "answer_em": answer_em,
             "answer_em_fuzzy": answer_em_fuzzy,
@@ -763,7 +755,6 @@ class LucioleRagSampleMetrics(SampleLevelComputation):
             "citation_precision_fuzzy": precision_fuzzy,
             "citation_recall_fuzzy": recall_fuzzy,
             "citation_f1_fuzzy": citation_f1_fuzzy,
-            "distractor_citation_rate": distractor_rate,
             "refusal_format_compliance": None,
             "refusal_format_precision": 0.0 if refused else None,
             "false_refusal_format_rate": 1.0 if refused else 0.0,
@@ -779,7 +770,6 @@ _HIGHER_IS_BETTER = {
     "citation_precision_fuzzy": True,
     "citation_recall_fuzzy": True,
     "citation_f1_fuzzy": True,
-    "distractor_citation_rate": False,
     "refusal_format_compliance": True,
     "refusal_format_precision": True,
     "false_refusal_format_rate": False,
