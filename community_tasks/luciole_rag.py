@@ -71,6 +71,16 @@ on Luciole-1B the two differ by ~30 points, so a low pattern score means
 Responses are stripped of ``<think>`` reasoning traces before scoring; see
 ``strip_reasoning``.
 
+Protocol version
+----------------
+Version 2 changes answer matching (markup removal, whole words, signed numeric
+values and explicit scales), scores missing expected citations as F1=0, removes
+``distractor_citation_rate``, rejects invalid judge refusal flags, and grades
+the final answer rather than a reasoning trace. Scores are not directly
+comparable with version 1; rerun both models under the same protocol/settings.
+Generation budget, drop ratio, judge model/backend and reasoning stripping
+must also be held fixed when comparing runs.
+
 Judge
 -----
 LLM-as-judge factual and refusal evaluation, opt-in via
@@ -1220,7 +1230,7 @@ def _make_task(subset: str) -> LightevalTaskConfig:
         metrics=_RAG_METRICS,
         generation_size=GENERATION_SIZE,
         stop_sequence=[],
-        version=1,
+        version=2,
     )
 
 
