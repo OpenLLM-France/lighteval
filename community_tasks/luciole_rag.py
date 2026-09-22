@@ -119,6 +119,15 @@ _CITATION_TAG_RE = re.compile(
     re.IGNORECASE,
 )
 
+# Any opening, closing or self-closing tag, attributes included: the
+# instructed <ref>, but also the <quote>, <answer> or <span> wrappers models
+# put around a value. Answer matching replaces these with a space:
+# normalization drops punctuation without inserting one, so an inline tag
+# would otherwise glue its name onto the adjacent answer word
+# ("delivery<ref name="source_1">" -> "deliveryref namesource_1"). A tag
+# must start with a letter right after "<", so comparisons like "< 5" stay.
+_MARKUP_TAG_RE = re.compile(r"</?[A-Za-z][\w-]*(?:\s[^<>]*)?/?>")
+
 
 # ── refusal: canonical phrases ─────────────────────────────────────
 
@@ -264,13 +273,20 @@ def evaluate_citations(
     return precision, recall, f1
 
 
+def _strip_markup(text: str) -> str:
+    """Replace markup tags with a space, keeping the text they wrap (quoted
+    excerpts for ``<ref>``).
+    """
+    return _MARKUP_TAG_RE.sub(" ", text)
+
+
 def compute_answer_em(response: str, gold_answer: str) -> float:
     """1.0 when the normalized gold answer appears as a substring of the
     normalized response, else 0.0.
     """
     if not gold_answer:
         return 0.0
-    norm_pred = normalize_answer(response)
+    norm_pred = normalize_answer(_strip_markup(response))
     norm_gold = normalize_answer(gold_answer)
     if not norm_gold:
         return 0.0
@@ -290,7 +306,7 @@ def compute_answer_em_fuzzy(
     """
     if not gold_answer:
         return 0.0
-    pred_tokens = set(normalize_answer(response).split())
+    pred_tokens = set(normalize_answer(_strip_markup(response)).split())
     gold_tokens = set(normalize_answer(gold_answer).split())
     if not gold_tokens:
         return 0.0
