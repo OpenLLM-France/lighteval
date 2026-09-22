@@ -313,6 +313,44 @@ def _extract_json(text: str) -> dict:
     raise json.JSONDecodeError("No JSON object found", text, 0)
 
 
+_JUDGE_PARSE_LOG_LIMIT = int(os.getenv("LUCIOLE_RAG_JUDGE_PARSE_LOG_LIMIT", "5"))
+_judge_parse_failure_counts: dict[str, int] = {}
+
+
+def _log_judge_parse_failure(judge_name: str, text: object, exc: Exception) -> None:
+    """Log the raw output of the first failures, so they can be diagnosed
+    without flooding large eval logs.
+    """
+    count = _judge_parse_failure_counts.get(judge_name, 0) + 1
+    _judge_parse_failure_counts[judge_name] = count
+    if count <= _JUDGE_PARSE_LOG_LIMIT:
+        logger.warning("%s response parse failed (%s). Raw response #%d: %r", judge_name, exc, count, str(text)[:2000])
+    elif count == _JUDGE_PARSE_LOG_LIMIT + 1:
+        logger.warning(
+            "%s response parse failures continue; further raw responses are suppressed "
+            "(set LUCIOLE_RAG_JUDGE_PARSE_LOG_LIMIT to change the limit).",
+            judge_name,
+        )
+
+
+def _parse_refused(parsed: dict) -> bool:
+    """Read the judge's "refused" flag. A missing or unrecognised value raises,
+    so the row is dropped instead of silently counted as a non-refusal.
+    """
+    val = parsed["refused"]
+    if isinstance(val, bool):
+        return val
+    if isinstance(val, (int, float)) and val in (0, 1):
+        return bool(val)
+    if isinstance(val, str):
+        norm = val.strip().lower()
+        if norm in ("true", "yes", "1", "oui"):
+            return True
+        if norm in ("false", "no", "0", "non"):
+            return False
+    raise ValueError(f"invalid refused value: {val!r}")
+
+
 # ── prompt-building primitives ─────────────────────────────────────
 
 _REF_TEMPLATE = '<ref name="{title}">{excerpt}</ref>'
@@ -730,15 +768,10 @@ def parse_factual_judge_response(text: str) -> dict | None:
         parsed = _extract_json(text)
         score = int(parsed["score"])
         if not (1 <= score <= 5):
-            return None
-        refused = parsed.get("refused", False)
-        if isinstance(refused, str):
-            refused = refused.strip().lower() in ("true", "yes", "1", "oui")
-        else:
-            refused = bool(refused)
-        return {"score": score, "refused": refused}
+            raise ValueError(f"score must be between 1 and 5, got {score}")
+        return {"score": score, "refused": _parse_refused(parsed)}
     except Exception as exc:
-        logger.warning("Factual judge response parse failed: %s", exc)
+        _log_judge_parse_failure("Factual judge", text, exc)
     return None
 
 
@@ -941,16 +974,9 @@ def parse_refusal_judge_response(text: str) -> bool | None:
     if text is None:
         return None
     try:
-        parsed = _extract_json(text)
-        val = parsed["refused"]
-        if isinstance(val, bool):
-            return val
-        if isinstance(val, (int, float)):
-            return bool(val)
-        if isinstance(val, str):
-            return val.strip().lower() in ("true", "yes", "1", "oui")
+        return _parse_refused(_extract_json(text))
     except Exception as exc:
-        logger.warning("Refusal judge response parse failed: %s", exc)
+        _log_judge_parse_failure("Refusal judge", text, exc)
     return None
 
 
