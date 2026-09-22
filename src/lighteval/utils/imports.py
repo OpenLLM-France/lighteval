@@ -233,6 +233,6 @@ def vllm_get_tokenizer(*args, **kwargs):
     except ImportError:
         from vllm.tokenizers import get_tokenizer  # vllm >= ~0.23
 
-    if "tokenizer_mode" not in inspect.signature(get_tokenizer).parameters:
+    if "tokenizer_mode" not in inspect.signature(get_tokenizer).parameters and kwargs.get("tokenizer_mode") in (None, "auto"):
         kwargs.pop("tokenizer_mode", None)
     return get_tokenizer(*args, **kwargs)
