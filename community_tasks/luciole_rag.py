@@ -256,7 +256,11 @@ def evaluate_citations(
     *,
     fuzzy: bool = False,
 ) -> tuple[float | None, float | None, float | None]:
-    """Citation precision/recall/F1 after citation-key normalization."""
+    """Citation precision/recall/F1 after citation-key normalization.
+
+    Citing nothing when sources were expected gives recall 0 and F1 0;
+    precision stays None there, since it is undefined without citations.
+    """
     cited_dedup = list(dict.fromkeys(t.strip() for t in cited if _citation_key(t)))
     expected_dedup = list(dict.fromkeys(t.strip() for t in expected if _citation_key(t)))
     if not cited_dedup and not expected_dedup:
@@ -270,6 +274,8 @@ def evaluate_citations(
     f1 = None
     if precision is not None and recall is not None:
         f1 = 0.0 if (precision + recall) == 0 else 2 * precision * recall / (precision + recall)
+    elif recall is not None:
+        f1 = 0.0
     return precision, recall, f1
 
 

@@ -121,3 +121,8 @@ def test_false_refusal_and_refusal_recall_keep_false_as_zero():
 )
 def test_answer_em_matches_whole_words_only(response, gold, expected):
     assert luciole_rag.compute_answer_em(response, gold) == expected
+
+
+def test_citation_f1_is_zero_when_expected_sources_are_not_cited():
+    assert luciole_rag.evaluate_citations([], ["source"]) == (None, 0.0, 0.0)
+    assert luciole_rag.evaluate_citations([], []) == (None, None, None)
