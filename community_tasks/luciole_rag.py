@@ -1176,6 +1176,12 @@ if _USE_JUDGE:
     _RAG_METRICS.append(luciole_rag_refusal_judge)
 
 
+# Max new tokens per generation. 2048 fits instruct models; reasoning models
+# spend it on the <think> trace and end truncated (54% of samples on
+# Luciole-1B-Thinking-DPO at 2048, 8% at 8192), so raise it for them.
+GENERATION_SIZE = int(os.getenv("LUCIOLE_RAG_GENERATION_SIZE", "2048"))
+
+
 def _make_task(subset: str) -> LightevalTaskConfig:
     evaluation_split = DATASET_EVAL_SPLITS.get(subset, "test")
     return LightevalTaskConfig(
@@ -1189,7 +1195,7 @@ def _make_task(subset: str) -> LightevalTaskConfig:
         few_shots_split=None,
         few_shots_select=None,
         metrics=_RAG_METRICS,
-        generation_size=2048,
+        generation_size=GENERATION_SIZE,
         stop_sequence=[],
         version=1,
     )
