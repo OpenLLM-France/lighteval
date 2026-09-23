@@ -50,10 +50,29 @@ How to run -- task strings are ``community|blend_<code>|0`` (pass ``--custom-tas
              blend_ga  blend_ja  blend_ms_sg  blend_zh_sg  blend_zh_tw  blend_es_ec  blend_sv
              blend_tl  blend_ta_sg  blend_ta_lk
 
-Each locale has 500 questions (evaluation-only -> run 0-shot). The gold set for a question is the
-union of all human answers (target-language ``answers`` + their ``en_answers``); a prediction is
-counted correct if any gold answer appears in it (accent/case/punctuation-insensitive, word-bounded),
-which mirrors BLEnD's rule-based short-answer matching. Metric: ``blend_acc``.
+--------------------------------------------------------------------------------------------------
+Scoring — follows the official repo (github.com/nlee0212/BLEnD, ``evaluation/exact_match.py``,
+``soft_exact_match``):
+  * A question is SKIPPED (not counted) when ``no-answer + not-applicable >= 3`` or ``idk >= 5``
+    annotators, or when it has no answers (prompt fn returns None -> excluded from the eval set,
+    so the corpus mean is over valid questions, as in the paper).
+  * A prediction is CORRECT if any human answer is contained in it, after lowercasing and removing
+    accents (BLEnD's rule; hyphen/space variants collapse under normalization).
+  * Two scores are reported, exactly like the paper:
+      - ``blend_acc``      : binary (any human answer matched).
+      - ``blend_weighted`` : vote-weighted -- the matched answer group's ``count / max_count``
+                             (reward for hitting the answer most annotators agreed on).
+  * English answer variants (``en_answers``) are included in the gold set (lenient toward a model
+    answering in English).
+
+KNOWN APPROXIMATION vs the official code: BLEnD additionally applies per-language lemmatizers/stemmers
+(konlpy, jieba, hazm, qalsadi, indic-nlp, spark-nlp, spaCy, ...) as a fallback when plain containment
+fails, to catch morphological variants. Those heavy per-language dependencies are NOT reproduced here;
+we use containment over accent-normalized text plus the multiple human-provided variants. Note the
+official repo has *no French branch* at all, so for French the effective rule there is exactly this
+containment check -- i.e. French is faithful; scores for morphologically rich languages (Arabic,
+Tamil, ...) may read slightly lower than the official lemmatized numbers.
+The prompt is the bare question (the paper's persona / instruction-wrapper variants are not applied).
 """
 
 import re
@@ -62,7 +81,7 @@ import unicodedata
 import numpy as np
 
 from lighteval.metrics.metrics_sample import SampleLevelComputation
-from lighteval.metrics.utils.metric_utils import SampleLevelMetric, SamplingMethod
+from lighteval.metrics.utils.metric_utils import SampleLevelMetricGrouping, SamplingMethod
 from lighteval.tasks.lighteval_task import LightevalTaskConfig
 from lighteval.tasks.requests import Doc
 
@@ -100,51 +119,67 @@ def _norm(text) -> str:
     return re.sub(r"\s+", " ", text).strip()
 
 
-def _gold_answers(line) -> list:
-    """Union of human answers for a question (target-language + English variants), deduplicated."""
-    golds = []
+def _answer_groups(line):
+    """[(normalized answers, vote count)] for each human answer group with >=1 vote (else empty)."""
+    groups = []
     for group in line.get("annotations") or []:
-        if (group.get("count") or 0) < 1:
+        count = group.get("count") or 0
+        if count < 1:
             continue
-        for key in ("answers", "en_answers"):
-            golds += [a for a in (group.get(key) or []) if a and str(a).strip()]
-    return list(dict.fromkeys(golds))
+        answers = [_norm(a) for a in (group.get("answers") or []) + (group.get("en_answers") or [])]
+        answers = [a for a in answers if a]
+        if answers:
+            groups.append((answers, count))
+    return groups
+
+
+def _skip(line) -> bool:
+    """Official BLEnD skip rule: too many annotators could not / would not answer."""
+    idks = line.get("idks") or {}
+    return (idks.get("no-answer", 0) + idks.get("not-applicable", 0) >= 3) or (idks.get("idk", 0) >= 5)
 
 
 def blend_prompt_fn(line, task_name: str = None):
-    golds = _gold_answers(line)
-    if not golds:  # only 'I don't know' answers were collected -> skip (nothing to score against)
+    if _skip(line):
         return None
+    groups = _answer_groups(line)
+    if not groups:
+        return None
+    flat = [a for answers, _ in groups for a in answers]
     return Doc(
         task_name=task_name,
         query=line["question"].strip(),
-        choices=golds,
-        gold_index=list(range(len(golds))),
+        choices=list(dict.fromkeys(flat)),
+        gold_index=list(range(len(set(flat)))),
+        specific={"groups": groups, "max_count": max(count for _, count in groups)},
     )
 
 
-class BlendShortAnswerMatch(SampleLevelComputation):
-    """Correct if any gold answer occurs in the generation (normalized, word-bounded) or matches it."""
+class BlendShortAnswer(SampleLevelComputation):
+    """BLEnD soft exact match: any human answer contained in the (accent-normalized) generation.
 
-    def compute(self, model_response, doc, **kwargs) -> float:
+    Returns the binary score and the vote-weighted score (matched group's count / max_count),
+    mirroring ``soft_exact_match`` in the official repo.
+    """
+
+    def compute(self, model_response, doc, **kwargs) -> dict:
         pred = _norm(model_response.text[0]) if getattr(model_response, "text", None) else ""
-        if not pred:
-            return 0.0
-        for gold in doc.choices:
-            g = _norm(gold)
-            if not g:
-                continue
-            if g == pred or re.search(rf"(?<!\w){re.escape(g)}(?!\w)", pred):
-                return 1.0
-        return 0.0
+        groups = (doc.specific or {}).get("groups", [])
+        max_count = (doc.specific or {}).get("max_count", 1) or 1
+        if pred:
+            # highest-vote matching group first, as in the official implementation
+            for answers, count in sorted(groups, key=lambda gc: gc[1], reverse=True):
+                if any(answer in pred for answer in answers):
+                    return {"blend_acc": 1.0, "blend_weighted": count / max_count}
+        return {"blend_acc": 0.0, "blend_weighted": 0.0}
 
 
-blend_metric = SampleLevelMetric(
-    metric_name="blend_acc",
-    sample_level_fn=BlendShortAnswerMatch(),
+blend_metric = SampleLevelMetricGrouping(
+    metric_name=["blend_acc", "blend_weighted"],
+    sample_level_fn=BlendShortAnswer(),
     category=SamplingMethod.GENERATIVE,
-    corpus_level_fn=np.mean,
-    higher_is_better=True,
+    corpus_level_fn={"blend_acc": np.mean, "blend_weighted": np.mean},
+    higher_is_better={"blend_acc": True, "blend_weighted": True},
 )
 
 
