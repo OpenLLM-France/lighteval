@@ -28,57 +28,74 @@ dataset:
 mrlbenchmarks/global-piqa-nonparallel
 
 abstract:
-Multilingual physical-commonsense reasoning (PIQA-style: a goal + two candidate solutions, pick the
-physically sensible one). Global-PIQA (MRL 2025 shared task) provides natively-authored,
-culturally-grounded items per language. This mirrors the English ``lighteval|piqa`` task (same
-``Question:/Answer:`` log-likelihood scoring), one task per language -- French included.
+Multilingual physical-commonsense reasoning: a goal + two candidate solutions, pick the physically
+sensible one. Global-PIQA (Global PIQA, EMNLP 2025 MRL shared task) provides natively-authored,
+culturally-grounded items in 100+ language varieties, incl. French (France & Canada).
 
 languages:
-multilingual (incl. French: France and Canada)
+33 curated language varieties (incl. French: France and Canada).
 
 tags:
 commonsense, physical-reasoning, multiple-choice, multilingual
 
 paper:
+https://arxiv.org/abs/2510.24081
 
 --------------------------------------------------------------------------------------------------
-Task names (task string ``community|piqa-<code>|0``, pass ``--custom-tasks <this file>``):
-    French:  community|piqa-fr        (France)      community|piqa-fr-ca   (Canada / Québec)
-    e.g.:    community|piqa-en  piqa-de  piqa-es  piqa-it  piqa-pt  piqa-zh  piqa-ru  piqa-ar ...
+Two task variants per language, matching the paper's two evaluation modes (both zero-shot, prompt in
+the target language; metric = accuracy):
 
-Each item: ``prompt`` (goal) + ``solution0``/``solution1`` + ``label`` (0/1). Scored exactly like
-``lighteval|piqa``: the model's per-solution log-likelihood, reported as ``acc`` and ``acc_norm``
-(character-length normalized). Eval split ``test`` (100 items per language; the benchmark is
-evaluation-only, so these run 0-shot).
+  * ``piqa_<code>``      -- for BASE (pretrained-only) models: the log-probability of each candidate
+                           solution given the goal is compared (``acc``, plus length-normalized
+                           ``acc_norm``). This is the paper's base-model protocol.
+  * ``piqa_<code>_gen``  -- for INSTRUCT models: the goal + the two options (A/B) are shown, the model
+                           generates an answer, and it is scored by string matching (``piqa_gen_acc``).
+                           This is the paper's instruction-tuned-model protocol.
 
-Uses the *non-parallel* set (each language authored independently -> culturally authentic). For a
-translated, cross-lingually comparable set, point ``HF_REPO`` at ``mrlbenchmarks/global-piqa-parallel``
-(same configs and schema).
+How to run (pass ``--custom-tasks <this file>``):
+    French, base:     community|piqa_fr|0        French, instruct:  community|piqa_fr_gen|0
+    Canada:           community|piqa_fr_ca|0 / community|piqa_fr_ca_gen|0
+    others:           community|piqa_de|0  piqa_es_gen  piqa_zh  piqa_ar_gen  ...
+
+KNOWN APPROXIMATIONS vs the official code:
+  - The paper normalizes the base-model log-prob by the solution's length in *bytes*; lighteval offers
+    character-length normalization (used here as ``acc_norm``), which equals bytes for Latin scripts
+    and differs slightly for multi-byte scripts.
+  - The instruct-model prompt's fixed wording ("Answer with A or B.") is in English (the paper's exact
+    template wording per language is not published); the goal and options are in the target language.
+  - Uses the *non-parallel* set (natively authored). Point ``HF_REPO`` at
+    ``mrlbenchmarks/global-piqa-parallel`` for the translated, cross-lingually comparable set.
 """
 
+import re
+import unicodedata
+
+import numpy as np
+
 from lighteval.metrics.metrics import Metrics
+from lighteval.metrics.metrics_sample import SampleLevelComputation
 from lighteval.metrics.normalizations import LogProbCharNorm
+from lighteval.metrics.utils.metric_utils import SampleLevelMetric, SamplingMethod
 from lighteval.tasks.lighteval_task import LightevalTaskConfig
 from lighteval.tasks.requests import Doc
 
 
 HF_REPO = "mrlbenchmarks/global-piqa-nonparallel"
 
-# Short code -> Global-PIQA config (ISO 639-3 + script [+ region]). A curated multilingual set;
-# extend it with any of the ~130 configs the dataset ships. French comes in two regional variants.
+# Short code (task-name suffix) -> Global-PIQA config. Extend with any of the ~130 configs shipped.
 LANGUAGES = {
     "fr": "fra_latn_fran",
-    "fr-ca": "fra_latn_cana",
+    "fr_ca": "fra_latn_cana",
     "en": "eng_latn",
     "de": "deu_latn",
     "es": "spa_latn_spai",
     "it": "ita_latn",
     "pt": "por_latn_port",
-    "pt-br": "por_latn_braz",
+    "pt_br": "por_latn_braz",
     "nl": "nld_latn",
     "ru": "rus_cyrl",
     "zh": "cmn_hans",
-    "zh-hant": "cmn_hant",
+    "zh_hant": "cmn_hant",
     "ja": "jpn_jpan",
     "ko": "kor_hang",
     "ar": "arb_arab",
@@ -103,21 +120,77 @@ LANGUAGES = {
 }
 
 
-def piqa_prompt_fn(line, task_name: str = None):
-    """Same format as lighteval's ``piqa_harness``, over Global-PIQA fields."""
+# --------------------------------------------------------------------------------------------------
+# Base-model variant: log-probability of each solution given the goal (paper's base-model protocol)
+# --------------------------------------------------------------------------------------------------
+def piqa_loglikelihood_prompt_fn(line, task_name: str = None):
     return Doc(
         task_name=task_name,
-        query=f"Question: {line['prompt']}\nAnswer:",
-        choices=[f" {line['solution0']}", f" {line['solution1']}"],
+        query=line["prompt"].strip(),
+        choices=[f" {line['solution0'].strip()}", f" {line['solution1'].strip()}"],
         gold_index=int(line["label"]),
     )
 
 
-def _make_task(code, hf_subset):
+# --------------------------------------------------------------------------------------------------
+# Instruct-model variant: show A/B options, generate, score by string matching (paper's IT protocol)
+# --------------------------------------------------------------------------------------------------
+def piqa_generative_prompt_fn(line, task_name: str = None):
+    sol0, sol1 = line["solution0"].strip(), line["solution1"].strip()
+    query = f"{line['prompt'].strip()}\n\nA. {sol0}\nB. {sol1}\n\nAnswer with A or B."
+    return Doc(
+        task_name=task_name,
+        query=query,
+        choices=[sol0, sol1],
+        gold_index=int(line["label"]),
+    )
+
+
+def _norm(text) -> str:
+    text = unicodedata.normalize("NFD", str(text))
+    text = "".join(ch for ch in text if unicodedata.category(ch) != "Mn")
+    text = re.sub(r"[^\w\s]", " ", text.lower(), flags=re.UNICODE)
+    return re.sub(r"\s+", " ", text).strip()
+
+
+class PiqaGenerativeMatch(SampleLevelComputation):
+    """String-match the generated answer against the gold option (by A/B letter, else by solution text)."""
+
+    def compute(self, model_response, doc, **kwargs) -> float:
+        text = ""
+        for attr in ("final_text", "text"):
+            seq = getattr(model_response, attr, None)
+            if seq:
+                text = seq[0]
+                break
+        label = doc.gold_index if isinstance(doc.gold_index, int) else doc.gold_index[0]
+        gold_letter = "A" if label == 0 else "B"
+        # 1) an explicit A/B choice (take the last standalone letter = the model's conclusion)
+        letters = re.findall(r"(?<![A-Za-z])([ABab])(?![A-Za-z])", text)
+        if letters:
+            return 1.0 if letters[-1].upper() == gold_letter else 0.0
+        # 2) fallback: the gold solution text is present and the distractor is not
+        pred = _norm(text)
+        gold, other = _norm(doc.choices[label]), _norm(doc.choices[1 - label])
+        if gold and gold in pred and not (other and other in pred):
+            return 1.0
+        return 0.0
+
+
+piqa_generative_metric = SampleLevelMetric(
+    metric_name="piqa_gen_acc",
+    sample_level_fn=PiqaGenerativeMatch(),
+    category=SamplingMethod.GENERATIVE,
+    corpus_level_fn=np.mean,
+    higher_is_better=True,
+)
+
+
+def _make_loglikelihood_task(code, hf_subset):
     return LightevalTaskConfig(
-        name=f"piqa-{code}",
+        name=f"piqa_{code}",
         suite=["community"],
-        prompt_function=piqa_prompt_fn,
+        prompt_function=piqa_loglikelihood_prompt_fn,
         hf_repo=HF_REPO,
         hf_subset=hf_subset,
         hf_avail_splits=["test"],
@@ -127,6 +200,9 @@ def _make_task(code, hf_subset):
         generation_size=-1,
         metrics=[
             Metrics.loglikelihood_acc,
+            # NOTE: the paper normalizes by BYTE length; lighteval only offers character-length
+            # normalization. This is exact for Latin scripts but a byte-length LogProbNormalization
+            # should be implemented (and used here) for non-Latin languages (CJK, Arabic, Cyrillic, ...).
             Metrics.loglikelihood_acc(
                 sample_params={"logprob_normalization": LogProbCharNorm(ignore_first_space=True)}
             ),
@@ -136,4 +212,24 @@ def _make_task(code, hf_subset):
     )
 
 
-TASKS_TABLE = [_make_task(code, hf_subset) for code, hf_subset in LANGUAGES.items()]
+def _make_generative_task(code, hf_subset):
+    return LightevalTaskConfig(
+        name=f"piqa_{code}_gen",
+        suite=["community"],
+        prompt_function=piqa_generative_prompt_fn,
+        hf_repo=HF_REPO,
+        hf_subset=hf_subset,
+        hf_avail_splits=["test"],
+        evaluation_splits=["test"],
+        few_shots_split=None,
+        few_shots_select=None,
+        generation_size=32,
+        metrics=[piqa_generative_metric],
+        stop_sequence=["\n"],
+        version=0,
+    )
+
+
+TASKS_TABLE = [_make_loglikelihood_task(code, hf_subset) for code, hf_subset in LANGUAGES.items()] + [
+    _make_generative_task(code, hf_subset) for code, hf_subset in LANGUAGES.items()
+]

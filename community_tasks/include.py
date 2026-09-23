@@ -64,17 +64,31 @@ the ISO 639-1 language code (fr, de, es, ...); pass ``--custom-tasks <this file>
     French:  community|include_fr_mcf|0   community|include_fr_cf|0   community|include_fr_hybrid|0
     others:  community|include_de_mcf|0   community|include_es_mcf|0   community|include_ar_mcf|0  ...
 
-  Formulation: mcf  -> letters (A/B/C/D) scored by log-likelihood (the INCLUDE-standard setting)
+  Variant:     mcf  -> letters (A/B/C/D) scored by log-likelihood (base-model MCQ)
                cf   -> answer texts scored by log-likelihood
                hybrid
+               gen  -> the model GENERATES an answer letter, scored by string matching. This is the
+                       INCLUDE paper's instruction-tuned protocol; run it 5-shot (``|5``) to match
+                       the paper's main setting, e.g. ``community|include_fr_gen|5``.
   Few-shot examples are drawn from the `validation` split; evaluation on `test`. Metrics: `acc`
-  (+ token/char/PMI-normalized variants). Per-sample `doc.specific` carries `domain`, `subject`,
-  `regional_feature` (agnostic / region implicit / region explicit / culture), `country`, `level`
-  for offline breakdowns.
+  (+ token/char/PMI-normalized variants for the log-likelihood forms). Per-sample `doc.specific`
+  carries `domain`, `subject`, `regional_feature` (agnostic / region implicit / region explicit /
+  culture), `country`, `level` for offline breakdowns.
+
+Note: the log-likelihood forms (mcf/cf/hybrid) follow the lighteval multilingual convention; the
+paper itself reports GENERATIVE accuracy (5-shot, or 0-shot chain-of-thought for large models), which
+is the ``gen`` variant here.
 """
 
+import re
+import unicodedata
+
+import numpy as np
+
 from lighteval.metrics.dynamic_metrics import LogLikelihoodAccMetric
+from lighteval.metrics.metrics_sample import SampleLevelComputation
 from lighteval.metrics.normalizations import LogProbCharNorm, LogProbPMINorm, LogProbTokenNorm
+from lighteval.metrics.utils.metric_utils import SampleLevelMetric, SamplingMethod
 from lighteval.tasks.lighteval_task import LightevalTaskConfig
 from lighteval.tasks.multilingual.utils.task_utils import get_metrics_for_formulation
 from lighteval.tasks.requests import Doc
@@ -189,8 +203,88 @@ def _make_task(language_name, code, language, formulation):
     )
 
 
+# --------------------------------------------------------------------------------------------------
+# Generative variant (``include_<code>_gen``) — the INCLUDE paper's instruction-tuned protocol:
+# the model generates an answer letter (5-shot, or 0-shot) and it is scored by string matching.
+# Run few-shot with ``|5`` (the paper's main setting) using the `validation` split.
+# --------------------------------------------------------------------------------------------------
+_LETTERS = "ABCD"
+
+
+def _generative_prompt_fn(line, task_name: str = None):
+    options = [line["option_a"], line["option_b"], line["option_c"], line["option_d"]]
+    body = "\n".join(f"{letter}. {opt}" for letter, opt in zip(_LETTERS, options))
+    query = f"{line['question'].strip()}\n{body}\nAnswer with the letter of the correct option (A, B, C, or D)."
+    return Doc(
+        task_name=task_name,
+        query=query,
+        choices=options,
+        gold_index=int(line["answer"]),
+        specific={field: line.get(field) for field in _META_FIELDS},
+    )
+
+
+def _norm(text) -> str:
+    text = unicodedata.normalize("NFD", str(text))
+    text = "".join(ch for ch in text if unicodedata.category(ch) != "Mn")
+    text = re.sub(r"[^\w\s]", " ", text.lower(), flags=re.UNICODE)
+    return re.sub(r"\s+", " ", text).strip()
+
+
+class IncludeGenerativeMatch(SampleLevelComputation):
+    """Score a generated answer by string matching: the answer letter (A-D), else the option text."""
+
+    def compute(self, model_response, doc, **kwargs) -> float:
+        text = ""
+        for attr in ("final_text", "text"):
+            seq = getattr(model_response, attr, None)
+            if seq:
+                text = seq[0]
+                break
+        gold_idx = doc.gold_index if isinstance(doc.gold_index, int) else doc.gold_index[0]
+        gold_letter = _LETTERS[gold_idx]
+        # 1) explicit letter choice (last standalone A-D = the model's conclusion)
+        letters = re.findall(r"(?<![A-Za-z])([A-Da-d])(?![A-Za-z])", text)
+        if letters:
+            return 1.0 if letters[-1].upper() == gold_letter else 0.0
+        # 2) fallback: the gold option text appears and no other option text does
+        pred = _norm(text)
+        gold = _norm(doc.choices[gold_idx])
+        others = [_norm(c) for i, c in enumerate(doc.choices) if i != gold_idx]
+        if gold and gold in pred and not any(o and o in pred for o in others):
+            return 1.0
+        return 0.0
+
+
+include_generative_metric = SampleLevelMetric(
+    metric_name="acc",
+    sample_level_fn=IncludeGenerativeMatch(),
+    category=SamplingMethod.GENERATIVE,
+    corpus_level_fn=np.mean,
+    higher_is_better=True,
+)
+
+
+def _make_generative_task(language_name, code):
+    return LightevalTaskConfig(
+        name=f"include_{code}_gen",
+        suite=["community"],
+        prompt_function=_generative_prompt_fn,
+        hf_repo=HF_REPO,
+        hf_subset=language_name,
+        hf_avail_splits=["test", "validation"],
+        evaluation_splits=["test"],
+        few_shots_split="validation",
+        few_shots_select="sequential",
+        generation_size=32,
+        metrics=[include_generative_metric],
+        stop_sequence=["\n"],
+        version=0,
+    )
+
+
 TASKS_TABLE = [
     _make_task(language_name, code, language, formulation)
     for language_name, (code, language) in LANGUAGES.items()
     for formulation in FORMULATIONS
-]
+] + [_make_generative_task(language_name, code) for language_name, (code, _) in LANGUAGES.items()]
