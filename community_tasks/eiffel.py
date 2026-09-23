@@ -59,7 +59,7 @@ all_qa_formulations = [MCFFormulation(), CFFormulation(), HybridFormulation()]
 TASKS_TABLE.extend(
     [
         LightevalTaskConfig(
-            name=f"v3_idiomatic_expressions_mcq{'_context' if use_context else ''}_{formulation.name.lower()}:{subset.lower().replace(' ', '_')}",
+            name=f"eiffel_mcq{'_context' if use_context else ''}_{formulation.name.lower()}:{subset.lower().replace(' ', '_')}",
             prompt_function=get_mcq_prompt_function(
                 Language.FRENCH,
                 partial(
@@ -92,7 +92,7 @@ TASKS_TABLE.extend(
 TASKS_TABLE.extend(
     [
         LightevalTaskConfig(
-            name=f"v3_idiomatic_expressions_mcq{'_context' if use_context else ''}_{formulation.name.lower()}_english_distractor:{subset.lower().replace(' ', '_')}",
+            name=f"eiffel_mcq{'_context' if use_context else ''}_{formulation.name.lower()}_english_distractor:{subset.lower().replace(' ', '_')}",
             prompt_function=get_mcq_prompt_function(
                 Language.FRENCH,
                 partial(
@@ -136,7 +136,7 @@ def prompt_fn(line, task_name: str, use_context: bool, gold_column: str = "answe
 TASKS_TABLE.extend(
     [
         LightevalTaskConfig(
-            name=f"v3_idiomatic_expressions_fib{'_context' if use_context else ''}:{subset.lower().replace(' ', '_')}",
+            name=f"eiffel_fib{'_context' if use_context else ''}:{subset.lower().replace(' ', '_')}",
             prompt_function=partial(prompt_fn, use_context=use_context),
             suite=["community"],
             hf_repo="OpenLLM-France/EIFFEL_v3",
@@ -154,7 +154,7 @@ TASKS_TABLE.extend(
 TASKS_TABLE.extend(
     [
         LightevalTaskConfig(
-            name=f"v3_idiomatic_expressions_fib{'_context' if use_context else ''}_english_distractor:{subset.lower().replace(' ', '_')}",
+            name=f"eiffel_fib{'_context' if use_context else ''}_english_distractor:{subset.lower().replace(' ', '_')}",
             prompt_function=partial(
                 prompt_fn,
                 use_context=use_context,
@@ -201,7 +201,7 @@ def prompt_fn(line, task_name: str, fr_to_en=True) -> Doc:
 TASKS_TABLE.extend(
     [
         LightevalTaskConfig(
-            name=f"v3_idiomatic_expressions_translation:{subset.lower().replace(' ', '_')}",
+            name=f"eiffel_translation:{subset.lower().replace(' ', '_')}",
             prompt_function=prompt_fn,
             suite=["community"],
             hf_repo="OpenLLM-France/EIFFEL",
