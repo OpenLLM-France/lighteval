@@ -61,8 +61,18 @@ class _bootstrap_internal:
         rnd.seed(seed)
         samplings = []
         import multiprocessing as mp
+        import os as _os
 
-        with mp.Pool(mp.cpu_count()) as pool:
+        # Cap workers at the ALLOCATED CPUs (SLURM affinity), NOT mp.cpu_count(): on a shared compute node
+        # cpu_count() is the whole node (e.g. 128), so Pool(cpu_count()) spawns ~128 workers that each
+        # import numpy/pandas and together exhaust the open-files limit ("Too many open files") during the
+        # ifeval/ifbench metric stderr bootstrap. Override with LIGHTEVAL_STDERR_WORKERS.
+        try:
+            _nw = len(_os.sched_getaffinity(0))
+        except AttributeError:
+            _nw = mp.cpu_count()
+        _nw = max(1, int(_os.environ.get("LIGHTEVAL_STDERR_WORKERS", _nw)))
+        with mp.Pool(_nw) as pool:
             samplings = pool.starmap(
                 self.metric,
                 tqdm(

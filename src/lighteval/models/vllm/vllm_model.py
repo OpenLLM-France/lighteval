@@ -428,7 +428,7 @@ class VLLMModel(LightevalModel):
             import json as _json
             self.model_args.setdefault("hf_overrides", {}).update(_json.loads(_hfo))
         if self._max_length:
-            self.model_args["hf_overrides"] = {"max_position_embeddings": self._max_length}
+            self.model_args.setdefault("hf_overrides", {})["max_position_embeddings"] = self._max_length
 
         if config.quantization is not None:
             self.model_args["quantization"] = config.quantization
