@@ -22,6 +22,7 @@
 
 import logging
 import os
+from dataclasses import replace
 from datetime import timedelta
 from typing import Dict, Optional, Tuple, Union
 
@@ -49,6 +50,13 @@ from lighteval.models.abstract_model import LightevalModel, ModelConfig
 from lighteval.models.model_output import (
     Batch,
     ModelResponse,
+)
+from lighteval.models.thinking import (
+    DEFAULT_THINKING_BUDGET,
+    THINK_END_TAG,
+    ThinkingGenSample,
+    resolve_is_thinking_model,
+    two_phase_generate,
 )
 from lighteval.models.utils import _get_dtype, _get_model_sha, _simplify_name, uses_chat_template
 from lighteval.tasks.prompt_manager import PromptManager
@@ -111,6 +119,10 @@ class TransformersModelConfig(ModelConfig):
         multichoice_continuations_start_space (bool | None):
             Whether to add a space before multiple choice continuations. If None, uses model default.
             True forces adding space, False removes leading space if present.
+        move_trailing_context_space (bool):
+            Whether to move a trailing context space onto the continuation before tokenizing.
+            Defaults to True (natural multichoice tokenization). Set False for answer-only
+            perplexity / bits-per-byte so the continuation stays exactly the gold string.
         pairwise_tokenization (bool):
             Whether to tokenize context and continuation separately or together. Defaults to False.
         continuous_batching (bool):
@@ -159,6 +171,7 @@ class TransformersModelConfig(ModelConfig):
     trust_remote_code: bool = False
     compile: bool = False
     multichoice_continuations_start_space: bool | None = None
+    move_trailing_context_space: bool = True
     pairwise_tokenization: bool = False
     continuous_batching: bool = False
     override_chat_template: bool = None
@@ -201,6 +214,7 @@ class TransformersModel(LightevalModel):
         self.accelerator = Accelerator(kwargs_handlers=[InitProcessGroupKwargs(timeout=timedelta(seconds=3000))])
         self._device = self.accelerator.device
         self.multichoice_continuations_start_space = config.multichoice_continuations_start_space
+        self.move_trailing_context_space = config.move_trailing_context_space
         self._add_special_tokens = config.add_special_tokens or False
         self.skip_special_tokens = config.skip_special_tokens or True
         self.pairwise_tokenization = config.pairwise_tokenization
@@ -231,8 +245,26 @@ class TransformersModel(LightevalModel):
             model_size = -1
 
         self.prompt_manager = PromptManager(
-            use_chat_template=self.use_chat_template, tokenizer=self.tokenizer, system_prompt=config.system_prompt
+            use_chat_template=self.use_chat_template,
+            tokenizer=self.tokenizer,
+            system_prompt=config.system_prompt,
+            enable_thinking=config.enable_thinking,
         )
+
+        # Decide whether to use two-phase thinking generation, so the reasoning
+        # (<think>...</think>) and the answer are budgeted separately (see _padded_greedy_until).
+        self.is_thinking_model = resolve_is_thinking_model(
+            self.tokenizer,
+            self.use_chat_template,
+            config.enable_thinking,
+            config.generation_parameters.thinking_budget is not None,
+        )
+        if self.is_thinking_model:
+            logger.info(
+                "Detected a thinking model: reasoning will be generated with a separate budget "
+                f"(thinking_budget={self.config.generation_parameters.thinking_budget or DEFAULT_THINKING_BUDGET}) "
+                "and generation_size will apply only to the answer after </think>."
+            )
 
         # Initialize cache for tokenization and predictions
         self._cache = SampleCache(config)
@@ -260,6 +292,7 @@ class TransformersModel(LightevalModel):
 
         self.config = config
         self.multichoice_continuations_start_space = config.multichoice_continuations_start_space
+        self.move_trailing_context_space = config.move_trailing_context_space
         self._add_special_tokens = config.add_special_tokens
         self.skip_special_tokens = config.skip_special_tokens
         self.pairwise_tokenization = config.pairwise_tokenization
@@ -296,6 +329,16 @@ class TransformersModel(LightevalModel):
             use_chat_template=self.use_chat_template,
             tokenizer=self.tokenizer,
             system_prompt=config.system_prompt if config else None,
+            enable_thinking=config.enable_thinking if config else None,
+        )
+
+        # Decide whether to use two-phase thinking generation, so the reasoning
+        # (<think>...</think>) and the answer are budgeted separately (see _padded_greedy_until).
+        self.is_thinking_model = resolve_is_thinking_model(
+            self.tokenizer,
+            self.use_chat_template,
+            config.enable_thinking if config else None,
+            config is not None and config.generation_parameters.thinking_budget is not None,
         )
 
         # Initialize cache for tokenization and predictions
@@ -689,7 +732,7 @@ class TransformersModel(LightevalModel):
                     # NOTE: we are assuming all items in a batch behave similarly (same
                     # stop_tokens and max_tokens genrated) which is not necessarily
                     # the case! Because of that we only use batch size of 1
-                    stop_tokens = [self.tokenizer.eos_token] + batch[0].stop_sequences
+                    stop_tokens = [self.tokenizer.eos_token] + list(batch[0].stop_sequences)
 
                 max_new_tokens = batch[0].generation_size
                 num_samples = batch[0].num_samples
@@ -711,21 +754,29 @@ class TransformersModel(LightevalModel):
                 # The choice we go for here is to avoid truncating the prompt if we can, since it
                 # should have been managed by the prompt creator/few shot manager if requested by the user.
                 context_size = tokenized["input_ids"].shape[1]
-                if context_size > self.max_length:
-                    logger.warning(
-                        f"The context size of your batch ({context_size}) is bigger than the maximum context size allowed by the model ({self.max_length}) for a task in"
-                        + str({i.task_name for i in batch})
-                        + ". This is likely to lead to some errors."  # noqa C401
+                max_new_tokens = self._bound_generation_size(context_size, max_new_tokens, batch)
+
+                # For thinking models, generate the reasoning and the answer in two phases with
+                # separate budgets (see lighteval.models.thinking). generation_size (batch[0]) is
+                # the answer budget; the reasoning gets its own thinking_budget.
+                if self.is_thinking_model:
+                    thinking_budget = self.config.generation_parameters.thinking_budget or DEFAULT_THINKING_BUDGET
+                    raw_inputs = [
+                        ids[mask.bool()].tolist()
+                        for ids, mask in zip(tokenized["input_ids"], tokenized["attention_mask"])
+                    ]
+                    results.extend(
+                        two_phase_generate(
+                            inputs=raw_inputs,
+                            context=contexts,
+                            thinking_budget=thinking_budget,
+                            answer_budget=batch[0].generation_size,
+                            num_samples=num_samples,
+                            generate_fn=self._thinking_generate_fn,
+                            close_tag_ids=self.tokenizer.encode(THINK_END_TAG, add_special_tokens=False),
+                        )
                     )
-                    # There will be truncation of at least one sample, maximum generation size will be one
-                    max_new_tokens = 1
-                else:  # We can't allow generation of more than max_length
-                    if max_new_tokens is None:  # If generation size is not set, we go all the way
-                        max_new_tokens = self.max_length - context_size
-                    else:
-                        max_new_tokens = min(self.max_length - context_size, max_new_tokens)
-                        if max_new_tokens < 1:
-                            max_new_tokens = 1
+                    continue
 
                 prepared_batch = Batch(
                     input_ids=tokenized["input_ids"],
@@ -746,6 +797,81 @@ class TransformersModel(LightevalModel):
                 results.extend(cur_reponses)
 
         return dataset.get_original_order(results)
+
+    def _bound_generation_size(self, context_size: int, max_new_tokens: Optional[int], batch) -> int:
+        """Cap max_new_tokens so context + generation fits the model max length.
+
+        Avoid truncating the prompt if we can (the prompt/few-shot manager is expected to size the
+        context); this only kicks in when the model would otherwise overflow.
+        """
+        if context_size > self.max_length:
+            logger.warning(
+                f"The context size of your batch ({context_size}) is bigger than the maximum context size allowed by the model ({self.max_length}) for a task in"
+                + str({i.task_name for i in batch})
+                + ". This is likely to lead to some errors."  # noqa C401
+            )
+            # There will be truncation of at least one sample, maximum generation size will be one
+            return 1
+        if max_new_tokens is None:  # If generation size is not set, we go all the way
+            return self.max_length - context_size
+        return max(1, min(self.max_length - context_size, max_new_tokens))
+
+    def _thinking_generate_fn(
+        self,
+        inputs: list[list[int]],
+        max_new_tokens: Optional[int],
+        stop_tokens: list[str],
+        num_samples: int,
+    ) -> list[list[ThinkingGenSample]]:
+        """Backend primitive for two_phase_generate (see lighteval.models.thinking).
+
+        Builds a left-padded batch from the raw token ids and runs the standard padded generation.
+        _generate_padded already splits the decoded text at each stop string, so re-encoding that
+        text yields token ids consistent with it and free of the </think> stop, as the
+        two_phase_generate contract requires.
+        """
+        pad_id = (
+            self.tokenizer.pad_token_id if self.tokenizer.pad_token_id is not None else self.tokenizer.eos_token_id
+        )
+        maxlen = max(len(x) for x in inputs)
+        input_ids_rows = []
+        attn_rows = []
+        for x in inputs:
+            pad_len = maxlen - len(x)
+            input_ids_rows.append([pad_id] * pad_len + list(x))
+            attn_rows.append([0] * pad_len + [1] * len(x))
+        input_ids = torch.tensor(input_ids_rows, dtype=torch.long, device=self.device)
+        attention_mask = torch.tensor(attn_rows, dtype=torch.long, device=self.device)
+
+        # Bound the budget to the room left in the context window (never below 1 token).
+        room = self.max_length - maxlen
+        budget = room if max_new_tokens is None else min(max_new_tokens, room)
+        budget = max(1, budget)
+
+        batch = Batch(
+            input_ids=input_ids,
+            input_mask=attention_mask,
+            input_lengths=[len(x) for x in inputs],
+            truncated=[0] * len(inputs),
+            padded=[maxlen - len(x) for x in inputs],
+        )
+        # Chat models still stop on EOS; add the requested stops (e.g. </think>) on top.
+        all_stops = [self.tokenizer.eos_token] + list(stop_tokens)
+        responses = self._generate_padded(
+            batch=batch,
+            max_new_tokens=budget,
+            stop_tokens=all_stops,
+            returns_logits=False,
+            num_samples=num_samples,
+        )
+        result: list[list[ThinkingGenSample]] = []
+        for response in responses:
+            samples = [
+                ThinkingGenSample(text=text, token_ids=self.tokenizer.encode(text, add_special_tokens=False))
+                for text in response.text
+            ]
+            result.append(samples)
+        return result
 
     @cached(SamplingMethod.GENERATIVE)
     def greedy_until(
@@ -898,8 +1024,13 @@ class TransformersModel(LightevalModel):
         docs: list[Doc],
     ) -> list[ModelResponse]:
         """This function is used to compute the log likelihood of the context for perplexity metrics."""
+        # Perplexity tasks put the full text in `query` with `choices=None`; score it as
+        # a single continuation with empty context (mirrors the Nanotron backend) instead
+        # of crashing the shared path that iterates over `doc.choices`. Originals are kept
+        # so the metric still reads the text length from `doc.query`.
+        rolling_docs = [replace(doc, query="", choices=[doc.query]) if not doc.choices else doc for doc in docs]
         return self._loglikelihood_tokens(
-            docs,
+            rolling_docs,
             rolling=True,
         )
 
@@ -991,20 +1122,17 @@ class TransformersModel(LightevalModel):
                             choice_continuation, dtype=torch.long, device=self.device
                         )
                         continuation_length = len(choice_continuation_tensor)
-                        if rolling:
-                            choice_logits = choice_logits.unsqueeze(0).to(self.device)  # [1, seq, vocab]
-                            choice_continuation_tensor = (
-                                choice_continuation_tensor[:input_length].unsqueeze(0).to(self.device)
-                            )  # [1, seq]
-                        else:
-                            choice_logits = (
-                                choice_logits[input_length - continuation_length - 1 : input_length - 1]
-                                .unsqueeze(0)
-                                .to(self.device)
-                            )
-                            choice_continuation_tensor = choice_continuation_tensor.unsqueeze(0).to(
-                                self.device
-                            )  # [1, seq]
+                        # logits[i] predicts token i+1, so score the continuation against
+                        # logit positions [start : input_length-1]. Rolling previously used
+                        # the full unshifted logits, misaligning every token and inflating
+                        # perplexity; with an empty context the unpredictable first token is
+                        # dropped.
+                        start = max(input_length - continuation_length - 1, 0)
+                        choice_logits = choice_logits[start : input_length - 1].unsqueeze(0).to(self.device)
+                        n_pos = choice_logits.shape[1]
+                        choice_continuation_tensor = (
+                            choice_continuation_tensor[continuation_length - n_pos :].unsqueeze(0).to(self.device)
+                        )
 
                         # Check if per-token argmax is exactly equal to continuation
                         greedy_tokens = choice_logits.argmax(dim=-1).to(self.device)
@@ -1108,7 +1236,7 @@ class TransformersModel(LightevalModel):
                         # 2d on num choices and max len
                         len_choice = gathered_len_choices[i]
                         batch_tokenized_continuations_processed.append(
-                            gathered_continuations[i][:num_choices][:len_choice]
+                            gathered_continuations[i][:num_choices, :len_choice]
                         )
                         # 1d on max len context
                         len_context = gathered_len_context[i]
@@ -1120,6 +1248,10 @@ class TransformersModel(LightevalModel):
                     logits_sum_doc = batch_logits_sums[i]
                     tokenized_contexts_batch = batch_tokenized_contexts_processed[i]
                     tokenized_continuations_batch = batch_tokenized_continuations_processed[i]
+                    # Remove padding (-1) from continuations
+                    tokenized_continuations_batch = [
+                        [t for t in tokens if t != -1] for tokens in tokenized_continuations_batch.tolist()
+                    ]
                     answer = ModelResponse(
                         argmax_logits_eq_gold=[max_equal.cpu().item() for max_equal in max_equals_doc],
                         logprobs=[sum.cpu().item() for sum in logits_sum_doc],

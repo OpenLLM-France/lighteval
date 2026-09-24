@@ -71,7 +71,7 @@ class SampleLevelComputation(ABC):
         attr_strs = []
         for k, v in attrs.items():
             if callable(v):
-                val_str = v.__name__
+                val_str = getattr(v, "__name__", type(v).__name__)
             else:
                 val_str = str(v)
             attr_strs.append(f"{k}={val_str}")
@@ -762,6 +762,39 @@ class Faithfulness(SampleLevelComputation):
         return self.summac.score_one(inp, prediction)["score"]
 
 
+class RULER(SampleLevelComputation):
+    def __init__(
+        self,
+        aggregation_method="any",
+    ):
+        """RULER exact match class.
+
+        Args:
+            aggregation_method (str, optional): Method to aggregate multiple golds. Can be 'any' or 'all'. Defaults to 'any'.
+        """
+        if aggregation_method not in ["any", "all"]:
+            raise ValueError(f"aggregation_method must be one of 'any' or 'all'. Was {aggregation_method} instead.")
+        self.aggregation_method = aggregation_method
+
+    def compute(self, doc: Doc, model_response: ModelResponse, **kwargs) -> float:
+        """Computes the metric over a list of golds and predictions for one single sample.
+
+        Args:
+            doc (Doc): The document containing gold references.
+            model_response (ModelResponse): The model's response containing predictions.
+            **kwargs: Additional keyword arguments.
+
+        Returns:
+            float: Aggregated score over the current sample's items.
+        """
+        golds = doc.get_golds()
+        predictions = model_response.final_text
+        if self.aggregation_method == "any":
+            return max(1.0 if r.lower() in predictions[0].lower() else 0.0 for r in golds)
+        elif self.aggregation_method == "all":
+            return sum(1.0 if r.lower() in predictions[0].lower() else 0.0 for r in golds) / len(golds)
+
+
 class BLEURT(SampleLevelComputation):
     def __init__(self):
         """Creates a BLEURT scorer using a light bleurt-tiny-512 model.
@@ -980,10 +1013,17 @@ class JudgeLLM(SampleLevelComputation):
 
             case "transformers" | "vllm":
                 logger.debug("Checking availability of Transformers or VLLM model")
-                api = HfApi()
-                models = api.list_models(model_name=judge_model_name)
-                if not models:
-                    raise ValueError(f"{judge_model_name} not found on Hugging Face Hub")
+                # HfApi().list_models() is a live Hub API call that ignores HF_HUB_OFFLINE and hangs
+                # indefinitely on offline compute nodes (e.g. Adastra), stalling the whole run at
+                # "COMPUTING METRICS". Skip this existence check when offline — the judge weights are
+                # already in the local HF cache, so the check is unnecessary there.
+                if os.environ.get("HF_HUB_OFFLINE", "").lower() in ("1", "true", "yes"):
+                    logger.debug("HF_HUB_OFFLINE set — skipping the Hub availability check for the judge model")
+                else:
+                    api = HfApi()
+                    models = api.list_models(model_name=judge_model_name)
+                    if not models:
+                        raise ValueError(f"{judge_model_name} not found on Hugging Face Hub")
 
             case _:
                 raise ValueError(f"{judge_backend} is not a valid backend for llm as a judge metric")
@@ -1454,3 +1494,120 @@ class GPassAtK(SamplingMetric, SampleLevelComputation):
 
     def num_samples(self):
         return self.n if self.n is not None else self.k
+
+
+class COMETMetric(SampleLevelComputation):
+    def __init__(
+        self,
+        model_name: str = "Unbabel/wmt22-comet-da",
+        source_column: str = "source",
+        batch_size: int = 8,
+        gpus: int = 0,
+        accelerator: str = "cpu",
+    ):
+        """COMET metric for machine translation evaluation.
+
+        Args:
+            model_name (str): Name of the COMET model to use.
+            source_column (str): Key in doc.specific containing the source text.
+            batch_size (int): Batch size for COMET model inference.
+            gpus (int): Number of GPUs to use (0 for CPU-only).
+            accelerator (str): Accelerator to use ("cpu" or "cuda"). MPS is not supported.
+        """
+        if accelerator == "mps":
+            raise ValueError("MPS is not supported for COMET")
+
+        self.model_name = model_name
+        self.source_column = source_column
+        self.batch_size = batch_size
+        self.gpus = gpus
+        self.accelerator = accelerator
+        self._model = None
+
+    def compute(self, doc: Doc, model_response: ModelResponse, **kwargs) -> float:
+        """Computes the COMET score for a single translation.
+
+        Args:
+            doc (Doc): The document containing gold references and source text in doc.specific.
+            model_response (ModelResponse): The model's response containing predictions.
+            **kwargs: Unused; kept for compatibility with the metric compute signature.
+
+        Returns:
+            float: COMET score scaled to 0-100 (higher is better).
+        """
+        if self._model is None:
+            from comet import download_model, load_from_checkpoint
+
+            logger.info(f"Loading COMET model {self.model_name}...")
+            model_path = download_model(self.model_name)
+            self._model = load_from_checkpoint(model_path)
+
+        source = doc.specific[self.source_column]
+        prediction = model_response.final_text[0]
+        reference = doc.get_golds()[0]
+
+        data = [{"src": source, "mt": prediction, "ref": reference}]
+        output = self._model.predict(
+            data,
+            batch_size=self.batch_size,
+            gpus=self.gpus,
+            accelerator=self.accelerator,
+        )
+        return output.scores[0] * 100
+
+
+class MetricXMetric(SampleLevelComputation):
+    def __init__(
+        self,
+        model_name: str = "google/metricx-24-hybrid-large-v2p6",
+        tokenizer_name: str = "google/mt5-large",
+        source_column: str = "source",
+        batch_size: int = 8,
+        device: str = "cpu",
+    ):
+        """MetricX metric for machine translation evaluation.
+
+        Args:
+            model_name (str): Name of the MetricX model to use.
+            tokenizer_name (str): Name of the tokenizer to use.
+            source_column (str): Key in doc.specific containing the source text.
+            batch_size (int): Batch size for tokenization.
+            device (str): Device to run inference on ("cpu", "cuda").
+        """
+        self.model_name = model_name
+        self.tokenizer_name = tokenizer_name
+        self.source_column = source_column
+        self.batch_size = batch_size
+        self.device = device
+        self._model = None
+        self._tokenizer = None
+
+    def compute(self, doc: Doc, model_response: ModelResponse, **kwargs) -> float:
+        """Computes the MetricX score for a single translation.
+
+        Args:
+            doc (Doc): The document containing gold references and source text in doc.specific.
+            model_response (ModelResponse): The model's response containing predictions.
+            **kwargs: Unused; kept for compatibility with the metric compute signature.
+
+        Returns:
+            float: MetricX score (lower is better, typically 0-25).
+        """
+        if self._model is None:
+            from lighteval.metrics.imports.metricx_model import MetricXModel
+
+            logger.info(f"Loading MetricX model {self.model_name}...")
+            self._model = MetricXModel(self.model_name, device=self.device)
+            self._tokenizer = AutoTokenizer.from_pretrained(self.tokenizer_name)
+
+        source = doc.specific[self.source_column]
+        prediction = model_response.final_text[0]
+        reference = doc.get_golds()[0]
+
+        input_text = f"candidate: {prediction} reference: {reference} source: {source}"
+        inputs = self._tokenizer(input_text, return_tensors="pt", truncation=True, max_length=1024)
+        # MetricX requires removing the EOS token appended by the tokenizer
+        input_ids = inputs["input_ids"][:, :-1].to(self.device)
+        attention_mask = inputs["attention_mask"][:, :-1].to(self.device)
+
+        return self._model.predict(input_ids, attention_mask).item()

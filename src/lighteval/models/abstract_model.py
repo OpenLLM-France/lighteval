@@ -21,6 +21,7 @@
 # SOFTWARE.
 
 import json
+import os
 import re
 from abc import ABC, abstractmethod
 from typing import Optional, Union
@@ -86,7 +87,10 @@ class ModelConfig(BaseModel, extra="forbid"):
 
     generation_parameters: GenerationParameters = GenerationParameters()
     system_prompt: str | None = None
-    cache_dir: str = "~/.cache/huggingface/lighteval"
+    enable_thinking: bool | None = (
+        None  # whether to enable thinking mode in chat template (for models that support it). None means use the model's default.
+    )
+    cache_dir: str = os.path.join(os.environ.get("HF_HOME", "~/.cache/huggingface"), "lighteval")
 
     @classmethod
     def from_path(cls, path: str):
@@ -313,10 +317,16 @@ class LightevalModel(ABC):
         2) Works in case len(tok(context,cont)) != len(tok(context)) + len(tok(continuation)).
         E.g this can happen for chinese if no space is used between context/continuation
         """
-        n_spaces = len(context) - len(context.rstrip())
-        if n_spaces > 0:
-            continuations = [context[-n_spaces:] + cont for cont in continuations]
-            context = context[:-n_spaces]
+        # By default a trailing context space is moved onto the continuation so it
+        # tokenizes naturally (" Paris" -> "ĠParis"), which is what you want for
+        # multichoice. For answer-only perplexity / bits-per-byte the continuation
+        # must stay exactly the gold string so the scored tokens match the byte
+        # normalization, so models can opt out and keep the space in the context.
+        if getattr(self, "move_trailing_context_space", True):
+            n_spaces = len(context) - len(context.rstrip())
+            if n_spaces > 0:
+                continuations = [context[-n_spaces:] + cont for cont in continuations]
+                context = context[:-n_spaces]
 
         if pairwise:
             # We don't add special tokens to the continuation as if bos is added

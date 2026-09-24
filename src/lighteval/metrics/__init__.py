@@ -44,9 +44,15 @@ def apply_metric(responses: list[ModelResponse], docs: list[Doc], metrics: list[
     for i in range(len(docs)):
         output = {}
 
-        # Add batched metric results for this sample
-        for metric, metric_outputs in zip(batched_metrics, batched_outputs):
-            output.update({metric.metric_name: metric_outputs[metric.metric_name][i]})
+        # Add batched metric results for this sample.
+        # A batched metric's compute() may return either:
+        #   - a list of per-sample dicts:           [{submetric: value}, ...]
+        #   - a dict of per-submetric value lists:  {submetric: [value, ...]}
+        for metric_outputs in batched_outputs:
+            if isinstance(metric_outputs, dict):
+                output.update({name: values[i] for name, values in metric_outputs.items()})
+            else:
+                output.update(metric_outputs[i])
 
         # Add non-batched metric results for this sample
         for metric in non_batched_metrics:

@@ -211,7 +211,11 @@ class EvaluationTracker:
     @property
     def results(self):
         config_general = asdict(self.general_config_logger)
-        config_general["model_config"] = config_general["model_config"].model_dump()
+        # This exclude set is defense in depth: SecretStr fields already serialize masked,
+        # but this ensures no future plain-str secret field leaks through model_dump().
+        config_general["model_config"] = config_general["model_config"].model_dump(
+            exclude={"api_key", "inference_server_auth"}
+        )
         results = {
             "config_general": config_general,
             "results": self.metrics_logger.metric_aggregated,
@@ -251,20 +255,26 @@ class EvaluationTracker:
 
         results_dict = self.results
 
-        # Create the details datasets for later upload
+        # Create the details datasets for later upload. Building one hashes/pickles the whole Arrow
+        # table, and for tasks with very large fields (e.g. live_code_bench: long code + test cases)
+        # a single column can exceed Arrow's 2 GB offset limit -> "ArrowInvalid: offset overflow",
+        # which used to crash the whole run *before* the results were even written. Only build the
+        # details when something will actually consume them (saved to disk, pushed to the hub, or
+        # logged to W&B); otherwise skip straight to saving the results.
         details_datasets: dict[str, Dataset] = {}
-        for task_name, task_details in self.details_logger.details.items():
-            # Create a dataset from the dictionary - we force cast to str to avoid formatting problems for nested objects
-            dataset = Dataset.from_list([asdict(detail) for detail in task_details])
+        if self.should_save_details or self.should_push_to_hub or self.use_wandb:
+            for task_name, task_details in self.details_logger.details.items():
+                # Create a dataset from the dictionary - we force cast to str to avoid formatting problems for nested objects
+                dataset = Dataset.from_list([asdict(detail) for detail in task_details])
 
-            # We don't keep 'id' around if it's there
-            column_names = dataset.column_names
-            if "id" in dataset.column_names:
-                column_names = [t for t in dataset.column_names if t != "id"]
+                # We don't keep 'id' around if it's there
+                column_names = dataset.column_names
+                if "id" in dataset.column_names:
+                    column_names = [t for t in dataset.column_names if t != "id"]
 
-            # Sort column names to make it easier later
-            dataset = dataset.select_columns(sorted(column_names))
-            details_datasets[task_name] = dataset
+                # Sort column names to make it easier later
+                dataset = dataset.select_columns(sorted(column_names))
+                details_datasets[task_name] = dataset
 
         # We save results at every case
         self.save_results(date_id, results_dict)

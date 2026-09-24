@@ -40,10 +40,17 @@ if TYPE_CHECKING:
 
 
 class PromptManager:
-    def __init__(self, use_chat_template: bool = False, tokenizer=None, system_prompt: str | None = None):
+    def __init__(
+        self,
+        use_chat_template: bool = False,
+        tokenizer=None,
+        system_prompt: str | None = None,
+        enable_thinking: bool | None = None,
+    ):
         self.use_chat_template = use_chat_template
         self.tokenizer = tokenizer
         self.system_prompt = system_prompt  # System prompt to be used in chat templates
+        self.enable_thinking = enable_thinking
 
     def prepare_prompt(self, doc: Doc) -> str:
         """Prepare a prompt from a document, either using chat template or plain text format.
@@ -79,10 +86,14 @@ class PromptManager:
         else:
             message = [message]
 
+        kwargs = {}
+        if self.enable_thinking is not None:
+            kwargs["enable_thinking"] = self.enable_thinking
         return self.tokenizer.apply_chat_template(
             message,
             tokenize=False,
             add_generation_prompt=True,
+            **kwargs,
         )
 
     def prepare_prompt_api(self, doc: Doc) -> list[dict[str, str]]:
@@ -107,10 +118,22 @@ class PromptManager:
         if self.system_prompt is not None:
             messages.append({"role": "system", "content": self.system_prompt})
 
+        # Opt-in: emit doc.instruction as a system role rather than prepending it
+        # to the user query. Tasks that need a per-row system message (e.g. RAG
+        # benchmarks where the retrieved context is row-specific) set
+        # `Doc.specific["instruction_as_system"] = True` in their prompt function.
+        instruction_as_system = bool((doc.specific or {}).get("instruction_as_system"))
+        if instruction_as_system and doc.instruction is not None:
+            if messages and messages[0]["role"] == "system":
+                messages[0]["content"] = messages[0]["content"] + "\n\n" + doc.instruction
+            else:
+                messages.insert(0, {"role": "system", "content": doc.instruction})
+            instruction_used = True
+
         # Add few-shot examples
         for ix, fewshot_sample in enumerate(doc.fewshot_samples):
             query = self._extract_query(fewshot_sample.query, fewshot_sample.instruction)
-            if ix == 0 and doc.instruction is not None:
+            if ix == 0 and doc.instruction is not None and not instruction_used:
                 instruction_used = True
                 query = doc.instruction + query
 
@@ -129,10 +152,14 @@ class PromptManager:
         if tokenize:  # for local models
             assert self.tokenizer is not None, "Tokenizer must be set for chat template formatting."
 
+            kwargs = {}
+            if self.enable_thinking is not None:
+                kwargs["enable_thinking"] = self.enable_thinking
             return self.tokenizer.apply_chat_template(
                 messages,
                 tokenize=False,
                 add_generation_prompt=True,
+                **kwargs,
             )
 
         else:  # for apis

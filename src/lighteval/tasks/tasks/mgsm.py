@@ -22,12 +22,26 @@ https://arxiv.org/abs/2210.03057
 """
 
 from lighteval.metrics.metrics import Metrics
+from lighteval.metrics.normalizations import helm_normalizer
 from lighteval.tasks.lighteval_task import LightevalTaskConfig
 from lighteval.tasks.requests import Doc
 
 
+MGSM_HF_REVISION = "2e3d3e94b252b3a5829ed998a4f6229e15adb1a7"
+MGSM_METRICS = [
+    Metrics.exact_match(
+        sample_params={
+            "type_exact_match": "suffix",
+            "normalize_gold": helm_normalizer,
+            "normalize_pred": helm_normalizer,
+        }
+    ),
+    Metrics.expr_gold_metric(sample_params={"normalize_gold": helm_normalizer, "normalize_pred": helm_normalizer}),
+]
+
+
 def mgsm_prompt(line, question_key, answer_key, task_name: str = None):
-    if line["answer"] is not None:
+    if line.get("answer") is not None:  # rev2 data ships only answer_number (no CoT answer)
         query = f"{line['question']}\n{answer_key}"
         gold = f" {line['answer'][len(answer_key) + 1 :]}"
     else:
@@ -107,13 +121,14 @@ mgsm_en = LightevalTaskConfig(
     prompt_function=mgsm_en_prompt,
     hf_repo="juletxara/mgsm",
     hf_subset="en",
+    hf_revision=MGSM_HF_REVISION,
     hf_avail_splits=["train", "test"],
     evaluation_splits=["test"],
     few_shots_split=None,
     few_shots_select=None,
     generation_size=None,
-    metrics=[Metrics.exact_match],
-    stop_sequence=None,
+    metrics=MGSM_METRICS,
+    stop_sequence=["\n", "=", "Question="],
     version=0,
 )
 
@@ -122,13 +137,14 @@ mgsm_es = LightevalTaskConfig(
     prompt_function=mgsm_es_prompt,
     hf_repo="juletxara/mgsm",
     hf_subset="es",
+    hf_revision=MGSM_HF_REVISION,
     hf_avail_splits=["train", "test"],
     evaluation_splits=["test"],
     few_shots_split=None,
     few_shots_select=None,
     generation_size=None,
-    metrics=[Metrics.exact_match],
-    stop_sequence=None,
+    metrics=MGSM_METRICS,
+    stop_sequence=["\n", "=", "Pregunta="],
     version=0,
 )
 
@@ -137,13 +153,14 @@ mgsm_fr = LightevalTaskConfig(
     prompt_function=mgsm_fr_prompt,
     hf_repo="juletxara/mgsm",
     hf_subset="fr",
+    hf_revision=MGSM_HF_REVISION,
     hf_avail_splits=["train", "test"],
     evaluation_splits=["test"],
     few_shots_split=None,
     few_shots_select=None,
     generation_size=None,
-    metrics=[Metrics.exact_match],
-    stop_sequence=None,
+    metrics=MGSM_METRICS,
+    stop_sequence=["\n", "=", "Question="],
     version=0,
 )
 
@@ -152,13 +169,14 @@ mgsm_de = LightevalTaskConfig(
     prompt_function=mgsm_de_prompt,
     hf_repo="juletxara/mgsm",
     hf_subset="de",
+    hf_revision=MGSM_HF_REVISION,
     hf_avail_splits=["train", "test"],
     evaluation_splits=["test"],
     few_shots_split=None,
     few_shots_select=None,
     generation_size=None,
-    metrics=[Metrics.exact_match],
-    stop_sequence=None,
+    metrics=MGSM_METRICS,
+    stop_sequence=["\n", "=", "Frage="],
     version=0,
 )
 
@@ -167,13 +185,14 @@ mgsm_ru = LightevalTaskConfig(
     prompt_function=mgsm_ru_prompt,
     hf_repo="juletxara/mgsm",
     hf_subset="ru",
+    hf_revision=MGSM_HF_REVISION,
     hf_avail_splits=["train", "test"],
     evaluation_splits=["test"],
     few_shots_split=None,
     few_shots_select=None,
     generation_size=None,
-    metrics=[Metrics.exact_match],
-    stop_sequence=None,
+    metrics=MGSM_METRICS,
+    stop_sequence=["\n", "=", "Задача="],
     version=0,
 )
 
@@ -182,13 +201,14 @@ mgsm_zh = LightevalTaskConfig(
     prompt_function=mgsm_zh_prompt,
     hf_repo="juletxara/mgsm",
     hf_subset="zh",
+    hf_revision=MGSM_HF_REVISION,
     hf_avail_splits=["train", "test"],
     evaluation_splits=["test"],
     few_shots_split=None,
     few_shots_select=None,
     generation_size=None,
-    metrics=[Metrics.exact_match],
-    stop_sequence=None,
+    metrics=MGSM_METRICS,
+    stop_sequence=["\n", "=", "问题="],
     version=0,
 )
 
@@ -197,13 +217,14 @@ mgsm_ja = LightevalTaskConfig(
     prompt_function=mgsm_ja_prompt,
     hf_repo="juletxara/mgsm",
     hf_subset="ja",
+    hf_revision=MGSM_HF_REVISION,
     hf_avail_splits=["train", "test"],
     evaluation_splits=["test"],
     few_shots_split=None,
     few_shots_select=None,
     generation_size=None,
-    metrics=[Metrics.exact_match],
-    stop_sequence=None,
+    metrics=MGSM_METRICS,
+    stop_sequence=["\n", "=", "問題="],
     version=0,
 )
 
@@ -212,13 +233,14 @@ mgsm_th = LightevalTaskConfig(
     prompt_function=mgsm_th_prompt,
     hf_repo="juletxara/mgsm",
     hf_subset="th",
+    hf_revision=MGSM_HF_REVISION,
     hf_avail_splits=["train", "test"],
     evaluation_splits=["test"],
     few_shots_split=None,
     few_shots_select=None,
     generation_size=None,
-    metrics=[Metrics.exact_match],
-    stop_sequence=None,
+    metrics=MGSM_METRICS,
+    stop_sequence=["\n", "=", "โจทย์="],
     version=0,
 )
 
@@ -227,13 +249,14 @@ mgsm_sw = LightevalTaskConfig(
     prompt_function=mgsm_sw_prompt,
     hf_repo="juletxara/mgsm",
     hf_subset="sw",
+    hf_revision=MGSM_HF_REVISION,
     hf_avail_splits=["train", "test"],
     evaluation_splits=["test"],
     few_shots_split=None,
     few_shots_select=None,
     generation_size=None,
-    metrics=[Metrics.exact_match],
-    stop_sequence=None,
+    metrics=MGSM_METRICS,
+    stop_sequence=["\n", "=", "Swali="],
     version=0,
 )
 
@@ -242,13 +265,14 @@ mgsm_bn = LightevalTaskConfig(
     prompt_function=mgsm_bn_prompt,
     hf_repo="juletxara/mgsm",
     hf_subset="bn",
+    hf_revision=MGSM_HF_REVISION,
     hf_avail_splits=["train", "test"],
     evaluation_splits=["test"],
     few_shots_split=None,
     few_shots_select=None,
     generation_size=None,
-    metrics=[Metrics.exact_match],
-    stop_sequence=None,
+    metrics=MGSM_METRICS,
+    stop_sequence=["\n", "=", "প্রশ্ন="],
     version=0,
 )
 
@@ -257,13 +281,14 @@ mgsm_te = LightevalTaskConfig(
     prompt_function=mgsm_te_prompt,
     hf_repo="juletxara/mgsm",
     hf_subset="te",
+    hf_revision=MGSM_HF_REVISION,
     hf_avail_splits=["train", "test"],
     evaluation_splits=["test"],
     few_shots_split=None,
     few_shots_select=None,
     generation_size=None,
-    metrics=[Metrics.exact_match],
-    stop_sequence=None,
+    metrics=MGSM_METRICS,
+    stop_sequence=["\n", "=", "ప్రశ్న="],
     version=0,
 )
 
@@ -280,3 +305,50 @@ TASKS_TABLE = [
     mgsm_bn,
     mgsm_te,
 ]
+
+
+# MGSM rev2: the corrected MGSM test set (https://huggingface.co/datasets/lightonai/mgsm-rev2).
+#   - en/es/fr/de: served from OpenLLM-France/mgsm-rev2-with-train, which also ships the standard MGSM
+#     chain-of-thought exemplars as a `train` split -> run few-shot (e.g. |8) with proper CoT (the
+#     train rows carry the `answer`, rendered as separate user/assistant turns under a chat template).
+#   - other languages: not yet in that combined dataset, so they use the original lightonai/mgsm-rev2
+#     (test only) and run zero-shot -- few-shot is not available / not optimal for them.
+MGSM_REV2_HF_REVISION = "1463c6dc7991a8751b8e28e76f6c561b9201eb55"  # pinned lightonai/mgsm-rev2 revision
+MGSM_REV2_WITH_TRAIN = "OpenLLM-France/mgsm-rev2-with-train"
+
+
+def _mgsm_rev2_task(subset, prompt_function, stop_last, hf_repo, few_shots_split, hf_revision=None):
+    return LightevalTaskConfig(
+        name=f"mgsm-rev2:{subset}",
+        prompt_function=prompt_function,
+        hf_repo=hf_repo,
+        hf_subset=subset,
+        hf_revision=hf_revision,
+        hf_avail_splits=["train", "test"] if few_shots_split else ["test"],
+        evaluation_splits=["test"],
+        few_shots_split=few_shots_split,
+        few_shots_select="sequential" if few_shots_split else None,
+        generation_size=None,
+        metrics=MGSM_METRICS,
+        stop_sequence=["\n", "=", stop_last],
+        version=0,
+    )
+
+
+mgsm_rev2_tasks = [
+    # Covered by the combined dataset: corrected test + CoT few-shot `train`.
+    _mgsm_rev2_task("en", mgsm_en_prompt, mgsm_en.stop_sequence[-1], MGSM_REV2_WITH_TRAIN, "train"),
+    _mgsm_rev2_task("es", mgsm_es_prompt, mgsm_es.stop_sequence[-1], MGSM_REV2_WITH_TRAIN, "train"),
+    _mgsm_rev2_task("fr", mgsm_fr_prompt, mgsm_fr.stop_sequence[-1], MGSM_REV2_WITH_TRAIN, "train"),
+    _mgsm_rev2_task("de", mgsm_de_prompt, mgsm_de.stop_sequence[-1], MGSM_REV2_WITH_TRAIN, "train"),
+    # Not yet in the combined dataset: original lightonai/mgsm-rev2 (test only, zero-shot).
+    _mgsm_rev2_task("ru", mgsm_ru_prompt, mgsm_ru.stop_sequence[-1], "lightonai/mgsm-rev2", None, MGSM_REV2_HF_REVISION),
+    _mgsm_rev2_task("zh", mgsm_zh_prompt, mgsm_zh.stop_sequence[-1], "lightonai/mgsm-rev2", None, MGSM_REV2_HF_REVISION),
+    _mgsm_rev2_task("ja", mgsm_ja_prompt, mgsm_ja.stop_sequence[-1], "lightonai/mgsm-rev2", None, MGSM_REV2_HF_REVISION),
+    _mgsm_rev2_task("th", mgsm_th_prompt, mgsm_th.stop_sequence[-1], "lightonai/mgsm-rev2", None, MGSM_REV2_HF_REVISION),
+    _mgsm_rev2_task("sw", mgsm_sw_prompt, mgsm_sw.stop_sequence[-1], "lightonai/mgsm-rev2", None, MGSM_REV2_HF_REVISION),
+    _mgsm_rev2_task("bn", mgsm_bn_prompt, mgsm_bn.stop_sequence[-1], "lightonai/mgsm-rev2", None, MGSM_REV2_HF_REVISION),
+    _mgsm_rev2_task("te", mgsm_te_prompt, mgsm_te.stop_sequence[-1], "lightonai/mgsm-rev2", None, MGSM_REV2_HF_REVISION),
+]
+
+TASKS_TABLE += mgsm_rev2_tasks

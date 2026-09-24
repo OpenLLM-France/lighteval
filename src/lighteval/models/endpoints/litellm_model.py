@@ -26,6 +26,7 @@ from concurrent.futures import ThreadPoolExecutor
 from json import JSONDecodeError
 
 import requests
+from pydantic import SecretStr
 from tqdm import tqdm
 
 from lighteval.data import GenerativeTaskDataset
@@ -77,9 +78,10 @@ class LiteLLMModelConfig(ModelConfig):
         base_url (str | None):
             Custom base URL for the API. If None, uses provider's default URL.
             Useful for using custom endpoints or local deployments.
-        api_key (str | None):
+        api_key (SecretStr | None):
             API key for authentication. If None, reads from environment variables.
             Environment variable names are provider-specific (e.g., OPENAI_API_KEY).
+            Stored as a SecretStr so it is masked in logs, reprs, and serialized configs.
         concurrent_requests (int):
             Maximum number of concurrent API requests to execute in parallel.
             Higher values can improve throughput for batch processing but may hit rate limits
@@ -121,7 +123,7 @@ class LiteLLMModelConfig(ModelConfig):
     model_name: str
     provider: str | None = None
     base_url: str | None = None
-    api_key: str | None = None
+    api_key: SecretStr | None = None
     concurrent_requests: int = 10
     verbose: bool = False
     max_model_length: int | None = None
@@ -144,7 +146,7 @@ class LiteLLMClient(LightevalModel):
         self.model = config.model_name
         self.provider = config.provider or config.model_name.split("/")[0]
         self.base_url = config.base_url
-        self.api_key = config.api_key
+        self.api_key = config.api_key.get_secret_value() if config.api_key is not None else None
         self.generation_parameters = config.generation_parameters
         self.concurrent_requests = config.concurrent_requests
         self._max_length = config.max_model_length
@@ -159,7 +161,10 @@ class LiteLLMClient(LightevalModel):
         litellm.drop_params = True
         litellm.verbose = config.verbose
         self.prompt_manager = PromptManager(
-            use_chat_template=True, tokenizer=self.tokenizer, system_prompt=config.system_prompt
+            use_chat_template=True,
+            tokenizer=self.tokenizer,
+            system_prompt=config.system_prompt,
+            enable_thinking=config.enable_thinking,
         )
 
         # Initialize cache for tokenization and predictions
@@ -203,7 +208,13 @@ class LiteLLMClient(LightevalModel):
             "messages": prompt,
             "response_format": {"type": "text"},
             "max_tokens": max_new_tokens,
-            "logprobs": return_logits if self.provider == "openai" else None,
+            # Never request per-token logprobs here: this endpoint is generative-only
+            # (loglikelihood raises NotImplementedError) and greedy_until only reads the text,
+            # so logprobs are unused. Requesting them makes the server return thousands of
+            # TopLogprob objects per response, which accumulate over all samples in the raw
+            # responses held in memory -> ~15 MB/sample host-RAM leak (OOM on e.g. mmlu_pro's
+            # 12032 samples). Keeping it off holds RAM flat (~2 GB instead of ~200 GB).
+            "logprobs": None,
             "stop": stop_sequence,
             "base_url": self.base_url,
             "api_key": self.api_key,
