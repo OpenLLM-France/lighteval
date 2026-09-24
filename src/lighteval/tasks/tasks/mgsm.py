@@ -307,21 +307,27 @@ TASKS_TABLE = [
 ]
 
 
-# MGSM rev2: the corrected MGSM test set combined with the standard MGSM chain-of-thought few-shot
-# exemplars in a `train` split (https://huggingface.co/datasets/OpenLLM-France/mgsm-rev2-with-train).
-# Run few-shot (e.g. |8): the train rows carry the CoT `answer`, so exemplars are shown with their
-# reasoning (as separate user/assistant turns under a chat template) and the test rows are scored on
-# `answer_number`. Same per-language prompts and metrics as the standard MGSM above.
-def _mgsm_rev2_task(subset, prompt_function, stop_last):
+# MGSM rev2: the corrected MGSM test set (https://huggingface.co/datasets/lightonai/mgsm-rev2).
+#   - en/es/fr/de: served from OpenLLM-France/mgsm-rev2-with-train, which also ships the standard MGSM
+#     chain-of-thought exemplars as a `train` split -> run few-shot (e.g. |8) with proper CoT (the
+#     train rows carry the `answer`, rendered as separate user/assistant turns under a chat template).
+#   - other languages: not yet in that combined dataset, so they use the original lightonai/mgsm-rev2
+#     (test only) and run zero-shot -- few-shot is not available / not optimal for them.
+MGSM_REV2_HF_REVISION = "1463c6dc7991a8751b8e28e76f6c561b9201eb55"  # pinned lightonai/mgsm-rev2 revision
+MGSM_REV2_WITH_TRAIN = "OpenLLM-France/mgsm-rev2-with-train"
+
+
+def _mgsm_rev2_task(subset, prompt_function, stop_last, hf_repo, few_shots_split, hf_revision=None):
     return LightevalTaskConfig(
         name=f"mgsm-rev2:{subset}",
         prompt_function=prompt_function,
-        hf_repo="OpenLLM-France/mgsm-rev2-with-train",
+        hf_repo=hf_repo,
         hf_subset=subset,
-        hf_avail_splits=["train", "test"],
+        hf_revision=hf_revision,
+        hf_avail_splits=["train", "test"] if few_shots_split else ["test"],
         evaluation_splits=["test"],
-        few_shots_split="train",
-        few_shots_select="sequential",
+        few_shots_split=few_shots_split,
+        few_shots_select="sequential" if few_shots_split else None,
         generation_size=None,
         metrics=MGSM_METRICS,
         stop_sequence=["\n", "=", stop_last],
@@ -329,12 +335,20 @@ def _mgsm_rev2_task(subset, prompt_function, stop_last):
     )
 
 
-# Languages currently available in OpenLLM-France/mgsm-rev2-with-train (extend as the dataset grows).
 mgsm_rev2_tasks = [
-    _mgsm_rev2_task("en", mgsm_en_prompt, mgsm_en.stop_sequence[-1]),
-    _mgsm_rev2_task("es", mgsm_es_prompt, mgsm_es.stop_sequence[-1]),
-    _mgsm_rev2_task("fr", mgsm_fr_prompt, mgsm_fr.stop_sequence[-1]),
-    _mgsm_rev2_task("de", mgsm_de_prompt, mgsm_de.stop_sequence[-1]),
+    # Covered by the combined dataset: corrected test + CoT few-shot `train`.
+    _mgsm_rev2_task("en", mgsm_en_prompt, mgsm_en.stop_sequence[-1], MGSM_REV2_WITH_TRAIN, "train"),
+    _mgsm_rev2_task("es", mgsm_es_prompt, mgsm_es.stop_sequence[-1], MGSM_REV2_WITH_TRAIN, "train"),
+    _mgsm_rev2_task("fr", mgsm_fr_prompt, mgsm_fr.stop_sequence[-1], MGSM_REV2_WITH_TRAIN, "train"),
+    _mgsm_rev2_task("de", mgsm_de_prompt, mgsm_de.stop_sequence[-1], MGSM_REV2_WITH_TRAIN, "train"),
+    # Not yet in the combined dataset: original lightonai/mgsm-rev2 (test only, zero-shot).
+    _mgsm_rev2_task("ru", mgsm_ru_prompt, mgsm_ru.stop_sequence[-1], "lightonai/mgsm-rev2", None, MGSM_REV2_HF_REVISION),
+    _mgsm_rev2_task("zh", mgsm_zh_prompt, mgsm_zh.stop_sequence[-1], "lightonai/mgsm-rev2", None, MGSM_REV2_HF_REVISION),
+    _mgsm_rev2_task("ja", mgsm_ja_prompt, mgsm_ja.stop_sequence[-1], "lightonai/mgsm-rev2", None, MGSM_REV2_HF_REVISION),
+    _mgsm_rev2_task("th", mgsm_th_prompt, mgsm_th.stop_sequence[-1], "lightonai/mgsm-rev2", None, MGSM_REV2_HF_REVISION),
+    _mgsm_rev2_task("sw", mgsm_sw_prompt, mgsm_sw.stop_sequence[-1], "lightonai/mgsm-rev2", None, MGSM_REV2_HF_REVISION),
+    _mgsm_rev2_task("bn", mgsm_bn_prompt, mgsm_bn.stop_sequence[-1], "lightonai/mgsm-rev2", None, MGSM_REV2_HF_REVISION),
+    _mgsm_rev2_task("te", mgsm_te_prompt, mgsm_te.stop_sequence[-1], "lightonai/mgsm-rev2", None, MGSM_REV2_HF_REVISION),
 ]
 
 TASKS_TABLE += mgsm_rev2_tasks
