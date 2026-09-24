@@ -53,6 +53,30 @@ from lighteval.utils.imports import is_package_available, requires, vllm_get_tok
 logger = logging.getLogger(__name__)
 
 
+def _model_uses_mistral_tokenizer(model_name: str, revision: str = "main") -> bool:
+    """Whether a model ships a ``tekken.json`` tokenizer file.
+
+    transformers v5 routes any model that ships a ``tekken.json`` to its
+    ``MistralCommonBackend`` tokenizer, which is incompatible with vLLM's
+    ``tokenizer_mode="auto"`` path (it has no ``is_fast`` attribute). For these
+    models vLLM must use its native ``tokenizer_mode="mistral"`` instead.
+
+    The check is local-only (no network), so it is safe under ``HF_HUB_OFFLINE``.
+    """
+    # Local directory: look for the file directly.
+    if os.path.isdir(model_name):
+        return os.path.isfile(os.path.join(model_name, "tekken.json"))
+    # Hub repo id: look in the local HF cache (resolves the revision ref offline).
+    try:
+        from huggingface_hub import try_to_load_from_cache
+
+        cached = try_to_load_from_cache(model_name, "tekken.json", revision=revision)
+        return isinstance(cached, str)
+    except Exception as e:  # pragma: no cover - detection must never be fatal
+        logger.debug("Could not determine tokenizer backend for %s: %s", model_name, e)
+        return False
+
+
 if is_package_available("vllm"):
     import ray
     from more_itertools import distribute
@@ -277,6 +301,15 @@ class VLLMModel(LightevalModel):
         self.pipeline_parallel_size = config.pipeline_parallel_size
         self.prefill_context_parallel_size = config.prefill_context_parallel_size
         self._add_special_tokens = config.add_special_tokens if config.add_special_tokens is not None else False
+        # transformers v5 routes models shipping a `tekken.json` to a tokenizer backend that
+        # vLLM's "auto" path can't consume; use vLLM's native "mistral" tokenizer_mode for those.
+        self._tokenizer_mode = (
+            "mistral"
+            if _model_uses_mistral_tokenizer(config.tokenizer or config.model_name, config.revision)
+            else "auto"
+        )
+        if self._tokenizer_mode == "mistral":
+            logger.info("Detected a Mistral (tekken) model; using tokenizer_mode='mistral'.")
         self._tokenizer = self._create_auto_tokenizer(config)
 
         self._max_length = (
@@ -406,7 +439,7 @@ class VLLMModel(LightevalModel):
         """
         self.model_args = {
             "model": config.model_name,
-            "tokenizer_mode": os.environ.get("LIGHTEVAL_TOKENIZER_MODE", "auto"),
+            "tokenizer_mode": self._tokenizer_mode,
             "gpu_memory_utilization": config.gpu_memory_utilization,
             "enable_prefix_caching": config.enable_prefix_caching,
             "revision": config.revision + (f"/{config.subfolder}" if config.subfolder is not None else ""),
@@ -492,7 +525,7 @@ class VLLMModel(LightevalModel):
     def _create_auto_tokenizer(self, config: VLLMModelConfig):
         tokenizer = vllm_get_tokenizer(
             config.tokenizer or config.model_name,  # use HF tokenizer for non-HF models, like GGUF model.
-            tokenizer_mode=os.environ.get("LIGHTEVAL_TOKENIZER_MODE", "auto"),
+            tokenizer_mode=self._tokenizer_mode,
             trust_remote_code=config.trust_remote_code,
             revision=config.revision,
         )
@@ -850,7 +883,7 @@ class AsyncVLLMModel(VLLMModel):
         """
         self.model_args = {
             "model": config.model_name,
-            "tokenizer_mode": os.environ.get("LIGHTEVAL_TOKENIZER_MODE", "auto"),
+            "tokenizer_mode": self._tokenizer_mode,
             "gpu_memory_utilization": config.gpu_memory_utilization,
             "revision": config.revision + (f"/{config.subfolder}" if config.subfolder is not None else ""),
             "dtype": config.dtype,
