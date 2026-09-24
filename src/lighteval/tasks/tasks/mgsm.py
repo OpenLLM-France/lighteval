@@ -307,22 +307,21 @@ TASKS_TABLE = [
 ]
 
 
-# MGSM rev2: revised MGSM data (https://huggingface.co/datasets/lightonai/mgsm-rev2), test split only
-# (no train / no chain-of-thought), run zero-shot. Same per-language prompts and metrics as MGSM above.
-MGSM_REV2_HF_REVISION = "1463c6dc7991a8751b8e28e76f6c561b9201eb55"
-
-
+# MGSM rev2: the corrected MGSM test set combined with the standard MGSM chain-of-thought few-shot
+# exemplars in a `train` split (https://huggingface.co/datasets/OpenLLM-France/mgsm-rev2-with-train).
+# Run few-shot (e.g. |8): the train rows carry the CoT `answer`, so exemplars are shown with their
+# reasoning (as separate user/assistant turns under a chat template) and the test rows are scored on
+# `answer_number`. Same per-language prompts and metrics as the standard MGSM above.
 def _mgsm_rev2_task(subset, prompt_function, stop_last):
     return LightevalTaskConfig(
         name=f"mgsm-rev2:{subset}",
         prompt_function=prompt_function,
-        hf_repo="lightonai/mgsm-rev2",
+        hf_repo="OpenLLM-France/mgsm-rev2-with-train",
         hf_subset=subset,
-        hf_revision=MGSM_REV2_HF_REVISION,
-        hf_avail_splits=["test"],
+        hf_avail_splits=["train", "test"],
         evaluation_splits=["test"],
-        few_shots_split=None,
-        few_shots_select=None,
+        few_shots_split="train",
+        few_shots_select="sequential",
         generation_size=None,
         metrics=MGSM_METRICS,
         stop_sequence=["\n", "=", stop_last],
@@ -330,18 +329,12 @@ def _mgsm_rev2_task(subset, prompt_function, stop_last):
     )
 
 
+# Languages currently available in OpenLLM-France/mgsm-rev2-with-train (extend as the dataset grows).
 mgsm_rev2_tasks = [
     _mgsm_rev2_task("en", mgsm_en_prompt, mgsm_en.stop_sequence[-1]),
     _mgsm_rev2_task("es", mgsm_es_prompt, mgsm_es.stop_sequence[-1]),
     _mgsm_rev2_task("fr", mgsm_fr_prompt, mgsm_fr.stop_sequence[-1]),
     _mgsm_rev2_task("de", mgsm_de_prompt, mgsm_de.stop_sequence[-1]),
-    _mgsm_rev2_task("ru", mgsm_ru_prompt, mgsm_ru.stop_sequence[-1]),
-    _mgsm_rev2_task("zh", mgsm_zh_prompt, mgsm_zh.stop_sequence[-1]),
-    _mgsm_rev2_task("ja", mgsm_ja_prompt, mgsm_ja.stop_sequence[-1]),
-    _mgsm_rev2_task("th", mgsm_th_prompt, mgsm_th.stop_sequence[-1]),
-    _mgsm_rev2_task("sw", mgsm_sw_prompt, mgsm_sw.stop_sequence[-1]),
-    _mgsm_rev2_task("bn", mgsm_bn_prompt, mgsm_bn.stop_sequence[-1]),
-    _mgsm_rev2_task("te", mgsm_te_prompt, mgsm_te.stop_sequence[-1]),
 ]
 
 TASKS_TABLE += mgsm_rev2_tasks
