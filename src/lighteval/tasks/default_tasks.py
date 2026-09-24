@@ -11297,6 +11297,281 @@ mgsm_te_lighteval = LightevalTaskConfig(
     stop_sequence=["\n", "=", "\u0c2a\u0c4d\u0c30\u0c36\u0c4d\u0c28="],
     version=0,
 )
+mgsm_rev2_en_lighteval = LightevalTaskConfig(
+    name="mgsm-rev2:en",
+    suite=["lighteval"],
+    prompt_function=prompt.mgsm_en,
+    hf_repo="lightonai/mgsm-rev2",
+    hf_subset="en",
+    hf_revision="1463c6dc7991a8751b8e28e76f6c561b9201eb55",
+    hf_avail_splits=["test"],
+    evaluation_splits=["test"],
+    few_shots_split=None,
+    few_shots_select=None,
+    generation_size=None,
+    metrics=[
+        Metrics.exact_match(
+            sample_params={
+                "type_exact_match": "suffix",
+                "normalize_gold": helm_normalizer,
+                "normalize_pred": helm_normalizer,
+            }
+        ),
+        Metrics.expr_gold_metric(sample_params={"normalize_gold": helm_normalizer, "normalize_pred": helm_normalizer}),
+    ],
+    stop_sequence=["\n", "=", "Question="],
+    version=0,
+)
+mgsm_rev2_es_lighteval = LightevalTaskConfig(
+    name="mgsm-rev2:es",
+    suite=["lighteval"],
+    prompt_function=prompt.mgsm_es,
+    hf_repo="lightonai/mgsm-rev2",
+    hf_subset="es",
+    hf_revision="1463c6dc7991a8751b8e28e76f6c561b9201eb55",
+    hf_avail_splits=["test"],
+    evaluation_splits=["test"],
+    few_shots_split=None,
+    few_shots_select=None,
+    generation_size=None,
+    metrics=[
+        Metrics.exact_match(
+            sample_params={
+                "type_exact_match": "suffix",
+                "normalize_gold": helm_normalizer,
+                "normalize_pred": helm_normalizer,
+            }
+        ),
+        Metrics.expr_gold_metric(sample_params={"normalize_gold": helm_normalizer, "normalize_pred": helm_normalizer}),
+    ],
+    stop_sequence=["\n", "=", "Pregunta="],
+    version=0,
+)
+mgsm_rev2_fr_lighteval = LightevalTaskConfig(
+    name="mgsm-rev2:fr",
+    suite=["lighteval"],
+    prompt_function=prompt.mgsm_fr,
+    hf_repo="lightonai/mgsm-rev2",
+    hf_subset="fr",
+    hf_revision="1463c6dc7991a8751b8e28e76f6c561b9201eb55",
+    hf_avail_splits=["test"],
+    evaluation_splits=["test"],
+    few_shots_split=None,
+    few_shots_select=None,
+    generation_size=None,
+    metrics=[
+        Metrics.exact_match(
+            sample_params={
+                "type_exact_match": "suffix",
+                "normalize_gold": helm_normalizer,
+                "normalize_pred": helm_normalizer,
+            }
+        ),
+        Metrics.expr_gold_metric(sample_params={"normalize_gold": helm_normalizer, "normalize_pred": helm_normalizer}),
+    ],
+    stop_sequence=["\n", "=", "Question="],
+    version=0,
+)
+mgsm_rev2_de_lighteval = LightevalTaskConfig(
+    name="mgsm-rev2:de",
+    suite=["lighteval"],
+    prompt_function=prompt.mgsm_de,
+    hf_repo="lightonai/mgsm-rev2",
+    hf_subset="de",
+    hf_revision="1463c6dc7991a8751b8e28e76f6c561b9201eb55",
+    hf_avail_splits=["test"],
+    evaluation_splits=["test"],
+    few_shots_split=None,
+    few_shots_select=None,
+    generation_size=None,
+    metrics=[
+        Metrics.exact_match(
+            sample_params={
+                "type_exact_match": "suffix",
+                "normalize_gold": helm_normalizer,
+                "normalize_pred": helm_normalizer,
+            }
+        ),
+        Metrics.expr_gold_metric(sample_params={"normalize_gold": helm_normalizer, "normalize_pred": helm_normalizer}),
+    ],
+    stop_sequence=["\n", "=", "Frage="],
+    version=0,
+)
+mgsm_rev2_ru_lighteval = LightevalTaskConfig(
+    name="mgsm-rev2:ru",
+    suite=["lighteval"],
+    prompt_function=prompt.mgsm_ru,
+    hf_repo="lightonai/mgsm-rev2",
+    hf_subset="ru",
+    hf_revision="1463c6dc7991a8751b8e28e76f6c561b9201eb55",
+    hf_avail_splits=["test"],
+    evaluation_splits=["test"],
+    few_shots_split=None,
+    few_shots_select=None,
+    generation_size=None,
+    metrics=[
+        Metrics.exact_match(
+            sample_params={
+                "type_exact_match": "suffix",
+                "normalize_gold": helm_normalizer,
+                "normalize_pred": helm_normalizer,
+            }
+        ),
+        Metrics.expr_gold_metric(sample_params={"normalize_gold": helm_normalizer, "normalize_pred": helm_normalizer}),
+    ],
+    stop_sequence=["\n", "=", "\u0417\u0430\u0434\u0430\u0447\u0430="],
+    version=0,
+)
+mgsm_rev2_zh_lighteval = LightevalTaskConfig(
+    name="mgsm-rev2:zh",
+    suite=["lighteval"],
+    prompt_function=prompt.mgsm_zh,
+    hf_repo="lightonai/mgsm-rev2",
+    hf_subset="zh",
+    hf_revision="1463c6dc7991a8751b8e28e76f6c561b9201eb55",
+    hf_avail_splits=["test"],
+    evaluation_splits=["test"],
+    few_shots_split=None,
+    few_shots_select=None,
+    generation_size=None,
+    metrics=[
+        Metrics.exact_match(
+            sample_params={
+                "type_exact_match": "suffix",
+                "normalize_gold": helm_normalizer,
+                "normalize_pred": helm_normalizer,
+            }
+        ),
+        Metrics.expr_gold_metric(sample_params={"normalize_gold": helm_normalizer, "normalize_pred": helm_normalizer}),
+    ],
+    stop_sequence=["\n", "=", "\u95ee\u9898="],
+    version=0,
+)
+mgsm_rev2_ja_lighteval = LightevalTaskConfig(
+    name="mgsm-rev2:ja",
+    suite=["lighteval"],
+    prompt_function=prompt.mgsm_ja,
+    hf_repo="lightonai/mgsm-rev2",
+    hf_subset="ja",
+    hf_revision="1463c6dc7991a8751b8e28e76f6c561b9201eb55",
+    hf_avail_splits=["test"],
+    evaluation_splits=["test"],
+    few_shots_split=None,
+    few_shots_select=None,
+    generation_size=None,
+    metrics=[
+        Metrics.exact_match(
+            sample_params={
+                "type_exact_match": "suffix",
+                "normalize_gold": helm_normalizer,
+                "normalize_pred": helm_normalizer,
+            }
+        ),
+        Metrics.expr_gold_metric(sample_params={"normalize_gold": helm_normalizer, "normalize_pred": helm_normalizer}),
+    ],
+    stop_sequence=["\n", "=", "\u554f\u984c="],
+    version=0,
+)
+mgsm_rev2_th_lighteval = LightevalTaskConfig(
+    name="mgsm-rev2:th",
+    suite=["lighteval"],
+    prompt_function=prompt.mgsm_th,
+    hf_repo="lightonai/mgsm-rev2",
+    hf_subset="th",
+    hf_revision="1463c6dc7991a8751b8e28e76f6c561b9201eb55",
+    hf_avail_splits=["test"],
+    evaluation_splits=["test"],
+    few_shots_split=None,
+    few_shots_select=None,
+    generation_size=None,
+    metrics=[
+        Metrics.exact_match(
+            sample_params={
+                "type_exact_match": "suffix",
+                "normalize_gold": helm_normalizer,
+                "normalize_pred": helm_normalizer,
+            }
+        ),
+        Metrics.expr_gold_metric(sample_params={"normalize_gold": helm_normalizer, "normalize_pred": helm_normalizer}),
+    ],
+    stop_sequence=["\n", "=", "\u0e42\u0e08\u0e17\u0e22\u0e4c="],
+    version=0,
+)
+mgsm_rev2_sw_lighteval = LightevalTaskConfig(
+    name="mgsm-rev2:sw",
+    suite=["lighteval"],
+    prompt_function=prompt.mgsm_sw,
+    hf_repo="lightonai/mgsm-rev2",
+    hf_subset="sw",
+    hf_revision="1463c6dc7991a8751b8e28e76f6c561b9201eb55",
+    hf_avail_splits=["test"],
+    evaluation_splits=["test"],
+    few_shots_split=None,
+    few_shots_select=None,
+    generation_size=None,
+    metrics=[
+        Metrics.exact_match(
+            sample_params={
+                "type_exact_match": "suffix",
+                "normalize_gold": helm_normalizer,
+                "normalize_pred": helm_normalizer,
+            }
+        ),
+        Metrics.expr_gold_metric(sample_params={"normalize_gold": helm_normalizer, "normalize_pred": helm_normalizer}),
+    ],
+    stop_sequence=["\n", "=", "Swali="],
+    version=0,
+)
+mgsm_rev2_bn_lighteval = LightevalTaskConfig(
+    name="mgsm-rev2:bn",
+    suite=["lighteval"],
+    prompt_function=prompt.mgsm_bn,
+    hf_repo="lightonai/mgsm-rev2",
+    hf_subset="bn",
+    hf_revision="1463c6dc7991a8751b8e28e76f6c561b9201eb55",
+    hf_avail_splits=["test"],
+    evaluation_splits=["test"],
+    few_shots_split=None,
+    few_shots_select=None,
+    generation_size=None,
+    metrics=[
+        Metrics.exact_match(
+            sample_params={
+                "type_exact_match": "suffix",
+                "normalize_gold": helm_normalizer,
+                "normalize_pred": helm_normalizer,
+            }
+        ),
+        Metrics.expr_gold_metric(sample_params={"normalize_gold": helm_normalizer, "normalize_pred": helm_normalizer}),
+    ],
+    stop_sequence=["\n", "=", "\u09aa\u09cd\u09b0\u09b6\u09cd\u09a8="],
+    version=0,
+)
+mgsm_rev2_te_lighteval = LightevalTaskConfig(
+    name="mgsm-rev2:te",
+    suite=["lighteval"],
+    prompt_function=prompt.mgsm_te,
+    hf_repo="lightonai/mgsm-rev2",
+    hf_subset="te",
+    hf_revision="1463c6dc7991a8751b8e28e76f6c561b9201eb55",
+    hf_avail_splits=["test"],
+    evaluation_splits=["test"],
+    few_shots_split=None,
+    few_shots_select=None,
+    generation_size=None,
+    metrics=[
+        Metrics.exact_match(
+            sample_params={
+                "type_exact_match": "suffix",
+                "normalize_gold": helm_normalizer,
+                "normalize_pred": helm_normalizer,
+            }
+        ),
+        Metrics.expr_gold_metric(sample_params={"normalize_gold": helm_normalizer, "normalize_pred": helm_normalizer}),
+    ],
+    stop_sequence=["\n", "=", "\u0c2a\u0c4d\u0c30\u0c36\u0c4d\u0c28="],
+    version=0,
+)
 minute_mysteries_qa_bigbench = LightevalTaskConfig(
     name="minute_mysteries_qa",
     suite=["bigbench", "bigbench_json"],
