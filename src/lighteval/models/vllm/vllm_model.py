@@ -449,10 +449,12 @@ class VLLMModel(LightevalModel):
             "seed": int(config.seed),
             "max_num_seqs": int(config.max_num_seqs),
             "max_num_batched_tokens": int(config.max_num_batched_tokens),
-            "enforce_eager": True,
+            "enforce_eager": os.environ.get("LIGHTEVAL_ENFORCE_EAGER", "1").strip().lower() not in ("0", "false", "no"),
         }
         if os.environ.get("LIGHTEVAL_LIMIT_MM_IMAGE"):
             self.model_args["limit_mm_per_prompt"] = {"image": int(os.environ["LIGHTEVAL_LIMIT_MM_IMAGE"])}
+        if os.environ.get("LIGHTEVAL_KV_CACHE_DTYPE"):
+            self.model_args["kv_cache_dtype"] = os.environ["LIGHTEVAL_KV_CACHE_DTYPE"]
         _hfo = os.environ.get("LIGHTEVAL_HF_OVERRIDES")
         if _hfo:
             import json as _json
@@ -879,12 +881,14 @@ class AsyncVLLMModel(VLLMModel):
             "seed": int(config.seed),
             "max_num_seqs": int(config.max_num_seqs),
             "max_num_batched_tokens": int(config.max_num_batched_tokens),
-            "enforce_eager": True,
+            "enforce_eager": os.environ.get("LIGHTEVAL_ENFORCE_EAGER", "1").strip().lower() not in ("0", "false", "no"),
         }
         if config.max_images is not None:
             self.model_args["limit_mm_per_prompt"] = {"image": config.max_images}
         if os.environ.get("LIGHTEVAL_LIMIT_MM_IMAGE"):
             self.model_args["limit_mm_per_prompt"] = {"image": int(os.environ["LIGHTEVAL_LIMIT_MM_IMAGE"])}
+        if os.environ.get("LIGHTEVAL_KV_CACHE_DTYPE"):
+            self.model_args["kv_cache_dtype"] = os.environ["LIGHTEVAL_KV_CACHE_DTYPE"]
         _hfo = os.environ.get("LIGHTEVAL_HF_OVERRIDES")
         if _hfo:
             import json as _json
