@@ -436,7 +436,6 @@ class VLLMModel(LightevalModel):
         """
         self.model_args = {
             "model": config.model_name,
-            "tokenizer_mode": os.environ.get("LIGHTEVAL_TOKENIZER_MODE", "auto"),
             "gpu_memory_utilization": config.gpu_memory_utilization,
             "enable_prefix_caching": config.enable_prefix_caching,
             "revision": config.revision + (f"/{config.subfolder}" if config.subfolder is not None else ""),
@@ -867,7 +866,6 @@ class AsyncVLLMModel(VLLMModel):
         """
         self.model_args = {
             "model": config.model_name,
-            "tokenizer_mode": os.environ.get("LIGHTEVAL_TOKENIZER_MODE", "auto"),
             "gpu_memory_utilization": config.gpu_memory_utilization,
             "revision": config.revision + (f"/{config.subfolder}" if config.subfolder is not None else ""),
             "dtype": config.dtype,
