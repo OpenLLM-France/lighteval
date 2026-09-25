@@ -151,7 +151,13 @@ def blend_prompt_fn(line, task_name: str = None):
         query=line["question"].strip(),
         choices=list(dict.fromkeys(flat)),
         gold_index=list(range(len(set(flat)))),
-        specific={"groups": groups, "max_count": max(count for _, count in groups)},
+        # Store groups as a list of dicts (a clean struct list), NOT (list, int) tuples: with
+        # --save-details, pyarrow types each tuple as a sequence and chokes on the list `answers`
+        # next to the int `count` ("cannot mix list and non-list, non-null values").
+        specific={
+            "groups": [{"answers": answers, "count": count} for answers, count in groups],
+            "max_count": max(count for _, count in groups),
+        },
     )
 
 
@@ -168,9 +174,9 @@ class BlendShortAnswer(SampleLevelComputation):
         max_count = (doc.specific or {}).get("max_count", 1) or 1
         if pred:
             # highest-vote matching group first, as in the official implementation
-            for answers, count in sorted(groups, key=lambda gc: gc[1], reverse=True):
-                if any(answer in pred for answer in answers):
-                    return {"blend_acc": 1.0, "blend_weighted": count / max_count}
+            for group in sorted(groups, key=lambda g: g["count"], reverse=True):
+                if any(answer in pred for answer in group["answers"]):
+                    return {"blend_acc": 1.0, "blend_weighted": group["count"] / max_count}
         return {"blend_acc": 0.0, "blend_weighted": 0.0}
 
 
