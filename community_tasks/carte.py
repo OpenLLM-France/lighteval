@@ -218,10 +218,26 @@ _PICK_LETTERS = list("ABCDE")  # CARTE items always have exactly 5 options A-E
 _PICK_NAMES = [f"pick_{letter}" for letter in _PICK_LETTERS]
 
 _ABSTENTION_NAMES = ["abstention_rate", "coverage", "selective_acc", "abstention_reward", "reliability"] + _PICK_NAMES
+
+
+def _selective_nanmean(xs):
+    """Mean over *answered* questions only (abstained/no-answer samples carry NaN and are skipped).
+
+    The function name deliberately avoids the substring "mean" so lighteval's get_stderr_function
+    routes it through bootstrap_stderr (which recomputes this aggregation per resample) instead of the
+    plain mean_stderr (std/sqrt(n)); mean_stderr does NOT ignore NaN and would return NaN for the
+    selective_acc stderr (the value itself is fine, only its stderr was NaN).
+    """
+    arr = np.asarray(xs, dtype=float)
+    return float(np.nanmean(arr)) if np.isfinite(arr).any() else float("nan")
+
+
+_selective_nanmean.__name__ = "selective_acc_agg"  # no "mean" substring -> nan-safe bootstrap stderr
+
 _ABSTENTION_CORPUS = {
     "abstention_rate": np.mean,
     "coverage": np.mean,
-    "selective_acc": np.nanmean,  # mean over *answered* questions only (NaN = abstained/no answer)
+    "selective_acc": _selective_nanmean,  # mean over *answered* only; nan-safe stderr via bootstrap
     "abstention_reward": np.mean,
     "reliability": np.mean,
     **dict.fromkeys(_PICK_NAMES, np.mean),
