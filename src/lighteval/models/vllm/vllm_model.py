@@ -458,6 +458,11 @@ class VLLMModel(LightevalModel):
             self.model_args["limit_mm_per_prompt"] = {"image": int(os.environ["LIGHTEVAL_LIMIT_MM_IMAGE"])}
         if os.environ.get("LIGHTEVAL_KV_CACHE_DTYPE"):
             self.model_args["kv_cache_dtype"] = os.environ["LIGHTEVAL_KV_CACHE_DTYPE"]
+        if os.environ.get("LIGHTEVAL_MODEL_IMPL"):
+            # Force vLLM's model implementation (e.g. "transformers" to serve archs whose native vLLM
+            # impl is broken -- Gaperon/Olmo2 with explicit head_dim -- via the HF modeling code on the
+            # vLLM engine). Values: "auto" | "vllm" | "transformers".
+            self.model_args["model_impl"] = os.environ["LIGHTEVAL_MODEL_IMPL"]
         _hfo = os.environ.get("LIGHTEVAL_HF_OVERRIDES")
         if _hfo:
             import json as _json
@@ -902,6 +907,8 @@ class AsyncVLLMModel(VLLMModel):
             self.model_args["limit_mm_per_prompt"] = {"image": int(os.environ["LIGHTEVAL_LIMIT_MM_IMAGE"])}
         if os.environ.get("LIGHTEVAL_KV_CACHE_DTYPE"):
             self.model_args["kv_cache_dtype"] = os.environ["LIGHTEVAL_KV_CACHE_DTYPE"]
+        if os.environ.get("LIGHTEVAL_MODEL_IMPL"):
+            self.model_args["model_impl"] = os.environ["LIGHTEVAL_MODEL_IMPL"]  # "auto"|"vllm"|"transformers"
         _hfo = os.environ.get("LIGHTEVAL_HF_OVERRIDES")
         if _hfo:
             import json as _json
