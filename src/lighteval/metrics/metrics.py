@@ -30,10 +30,13 @@ from lighteval.metrics.dynamic_metrics import MultilingualExtractiveMatchMetric
 from lighteval.metrics.harness_compatibility.drop import DropMetrics
 from lighteval.metrics.harness_compatibility.truthful_qa import TruthfulqaMCMetrics
 from lighteval.metrics.metrics_corpus import (
+    CorpusLevelCOMET,
     CorpusLevelF1Score,
+    CorpusLevelMetricX,
     CorpusLevelPerplexityMetric,
     CorpusLevelTranslationMetric,
     MatthewsCorrCoef,
+    MTSourcePreparator,
 )
 from lighteval.metrics.metrics_sample import (
     BLEU,
@@ -172,11 +175,11 @@ class Metrics(Enum):
         corpus_level_fn=CorpusLevelTranslationMetric("chrf++"),
         higher_is_better=True,
     )
-    comet = SampleLevelMetric(
+    comet = CorpusLevelMetric(
         metric_name="comet",
-        sample_level_fn=COMETMetric(),
+        sample_level_fn=MTSourcePreparator(),  # cheap: emit (source, gold, pred) per sample
         category=SamplingMethod.GENERATIVE,
-        corpus_level_fn=np.mean,
+        corpus_level_fn=CorpusLevelCOMET(),  # batched, GPU: one predict() over the whole set
         higher_is_better=True,
     )
     copyright = SampleLevelMetricGrouping(
@@ -388,11 +391,11 @@ class Metrics(Enum):
         corpus_level_fn=MatthewsCorrCoef(),
         higher_is_better=True,
     )
-    metricx = SampleLevelMetric(
+    metricx = CorpusLevelMetric(
         metric_name="metricx",
-        sample_level_fn=MetricXMetric(),
+        sample_level_fn=MTSourcePreparator(),  # cheap: emit (source, gold, pred) per sample
         category=SamplingMethod.GENERATIVE,
-        corpus_level_fn=np.mean,
+        corpus_level_fn=CorpusLevelMetricX(),  # batched, GPU: score all samples in chunks
         higher_is_better=False,
     )
     mrr = SampleLevelMetric(

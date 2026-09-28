@@ -858,7 +858,10 @@ class BLEU(SampleLevelComputation):
         """
         import nltk
 
-        nltk.download("punkt_tab")
+        try:  # punkt_tab is preloaded in NLTK_DATA; only hit the network if genuinely missing. This
+            nltk.data.find("tokenizers/punkt_tab")  # runs per sample, so an unconditional download()
+        except LookupError:  # would hang the whole job for ~30min on offline compute nodes (no network).
+            nltk.download("punkt_tab")
         golds = doc.get_golds()
         predictions = model_response.final_text
         return np.mean([self._bleu_score(golds, p) for p in predictions])
@@ -1510,8 +1513,8 @@ class COMETMetric(SampleLevelComputation):
         model_name: str = "Unbabel/wmt22-comet-da",
         source_column: str = "source",
         batch_size: int = 8,
-        gpus: int = 0,
-        accelerator: str = "cpu",
+        gpus: int | None = None,
+        accelerator: str | None = None,
     ):
         """COMET metric for machine translation evaluation.
 
@@ -1519,11 +1522,21 @@ class COMETMetric(SampleLevelComputation):
             model_name (str): Name of the COMET model to use.
             source_column (str): Key in doc.specific containing the source text.
             batch_size (int): Batch size for COMET model inference.
-            gpus (int): Number of GPUs to use (0 for CPU-only).
-            accelerator (str): Accelerator to use ("cpu" or "cuda"). MPS is not supported.
+            gpus (int | None): Number of GPUs to use. None -> auto (1 if CUDA is available, else 0).
+            accelerator (str | None): "cpu" or "cuda". None -> auto ("cuda" if available, else "cpu").
+                                       MPS is not supported. (COMET on CPU is ~100x slower.)
         """
         if accelerator == "mps":
             raise ValueError("MPS is not supported for COMET")
+        # Default to GPU when available: on a GPU node this metric is otherwise silently run on CPU
+        # (Lightning: "GPU available, used: False") and scoring a full test set takes hours instead of minutes.
+        import torch as _torch
+
+        _cuda = _torch.cuda.is_available()
+        if gpus is None:
+            gpus = 1 if _cuda else 0
+        if accelerator is None:
+            accelerator = "cuda" if _cuda else "cpu"
 
         self.model_name = model_name
         self.source_column = source_column
@@ -1560,6 +1573,12 @@ class COMETMetric(SampleLevelComputation):
             batch_size=self.batch_size,
             gpus=self.gpus,
             accelerator=self.accelerator,
+            # num_workers=0 -> single-process DataLoader. With workers>0, COMET's Trainer pickles the
+            # model to the worker, and on GPU the model carries an unpicklable forward hook
+            # ("output_capturing_hook", a ROCm-container artifact) -> PicklingError. Also no benefit
+            # from workers here since we predict one sample at a time.
+            num_workers=0,
+            progress_bar=False,
         )
         return output.scores[0] * 100
 
@@ -1571,7 +1590,7 @@ class MetricXMetric(SampleLevelComputation):
         tokenizer_name: str = "google/mt5-large",
         source_column: str = "source",
         batch_size: int = 8,
-        device: str = "cpu",
+        device: str | None = None,
     ):
         """MetricX metric for machine translation evaluation.
 
@@ -1580,8 +1599,14 @@ class MetricXMetric(SampleLevelComputation):
             tokenizer_name (str): Name of the tokenizer to use.
             source_column (str): Key in doc.specific containing the source text.
             batch_size (int): Batch size for tokenization.
-            device (str): Device to run inference on ("cpu", "cuda").
+            device (str | None): "cpu" or "cuda". None -> auto ("cuda" if available, else "cpu").
+                                 MetricX is a 3.7B MT5 -> CPU scoring a full test set takes hours.
         """
+        # Default to GPU when available (see COMETMetric): avoids silently running the 3.7B model on CPU.
+        if device is None:
+            import torch as _torch
+
+            device = "cuda" if _torch.cuda.is_available() else "cpu"
         self.model_name = model_name
         self.tokenizer_name = tokenizer_name
         self.source_column = source_column
