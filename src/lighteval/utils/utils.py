@@ -278,7 +278,13 @@ def safe_divide(numerator: np.ndarray, denominator: float, default_value: float 
     return np.where(denominator != 0, numerator / denominator, default_value)
 
 
-def remove_reasoning_tags(text: str, tag_pairs: list[tuple[str, str]]) -> str:
+# Reasoning/thinking tag pairs recognized by default across the codebase: `<think>` (DeepSeek-R1,
+# Qwen3, ...) and `[THINK]` (Mistral / Magistral). Kept as the single source of truth for the
+# helpers below and for the CLI/pipeline `reasoning_tags` default.
+DEFAULT_REASONING_TAG_PAIRS = (("<think>", "</think>"), ("[THINK]", "[/THINK]"))
+
+
+def remove_reasoning_tags(text: str, tag_pairs: list[tuple[str, str]] = DEFAULT_REASONING_TAG_PAIRS) -> str:
     """Removes all instances of reasoning tag pairs from text.
 
     Iteratively removes content between specified start and end tag pairs.
@@ -321,7 +327,7 @@ def remove_reasoning_tags(text: str, tag_pairs: list[tuple[str, str]]) -> str:
 
 def strip_reasoning(
     text: str,
-    tag_pairs: Iterable[tuple[str, str]] = (("<think>", "</think>"),),
+    tag_pairs: Iterable[tuple[str, str]] = DEFAULT_REASONING_TAG_PAIRS,
     unclosed: str = "keep_text",
     ignore_case: bool = False,
     replacement: str = "",
