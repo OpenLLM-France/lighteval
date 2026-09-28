@@ -102,6 +102,7 @@ from lighteval.metrics.utils.metric_utils import SampleLevelMetricGrouping
 from lighteval.metrics.utils.stderr import mean_stderr
 from lighteval.tasks.lighteval_task import LightevalTaskConfig
 from lighteval.tasks.requests import Doc, SamplingMethod
+from lighteval.utils.utils import strip_reasoning as strip_reasoning_tags
 
 
 logger = logging.getLogger(__name__)
@@ -180,9 +181,6 @@ def _normalize_spaces(text: str) -> str:
 # detection. Disable with LUCIOLE_RAG_STRIP_REASONING=0.
 STRIP_REASONING = os.getenv("LUCIOLE_RAG_STRIP_REASONING", "1").strip().lower() in ("1", "true", "yes", "on")
 
-_THINK_CLOSED_RE = re.compile(r"<think>.*?</think>", re.DOTALL | re.IGNORECASE)
-_THINK_UNCLOSED_RE = re.compile(r"<think>.*\Z", re.DOTALL | re.IGNORECASE)
-
 
 def strip_reasoning(text: str) -> str:
     """Drop ``<think>`` traces, keeping only the final answer. A trace left
@@ -192,9 +190,7 @@ def strip_reasoning(text: str) -> str:
     """
     if not text or not STRIP_REASONING:
         return text
-    text = _THINK_CLOSED_RE.sub(" ", text)
-    text = _THINK_UNCLOSED_RE.sub(" ", text)
-    return text.strip()
+    return strip_reasoning_tags(text, unclosed="drop", ignore_case=True, replacement=" ")
 
 
 _NORMALIZED_REFUSAL_PHRASES = tuple(

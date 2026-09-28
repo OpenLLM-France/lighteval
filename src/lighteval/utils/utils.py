@@ -11,6 +11,8 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+import re
+from collections.abc import Iterable
 from dataclasses import asdict, is_dataclass
 from typing import TypeVar, Union
 
@@ -315,3 +317,59 @@ def remove_reasoning_tags(text: str, tag_pairs: list[tuple[str, str]]) -> str:
                 break
 
     return result
+
+
+def strip_reasoning(
+    text: str,
+    tag_pairs: Iterable[tuple[str, str]] = (("<think>", "</think>"),),
+    unclosed: str = "keep_text",
+    ignore_case: bool = False,
+    replacement: str = "",
+) -> str:
+    """Strip reasoning/thinking traces from a model response.
+
+    Shared helper factoring out the near-duplicate ``_strip_reasoning`` /
+    ``_strip_thinking`` helpers that several community tasks used to define. It
+    always removes complete ``start_tag ... end_tag`` blocks; the ``unclosed``
+    policy controls what happens to a start tag left open (the reasoning was
+    truncated by the generation budget, so no final answer was produced):
+
+    - ``"keep_text"``: drop any leftover stray tags but keep the surrounding
+      text (so a judge still sees the truncated reasoning rather than nothing).
+    - ``"drop"``: drop the open tag and everything after it (an unanswered
+      sample strips to an empty string).
+    - ``"ignore"``: leave stray tags untouched (only complete blocks removed).
+
+    Args:
+        text: The model response to clean.
+        tag_pairs: Iterable of ``(start_tag, end_tag)`` pairs to strip.
+        unclosed: Policy for an unmatched start tag (see above).
+        ignore_case: Match tags case-insensitively.
+        replacement: String substituted for each removed block/tag.
+
+    Returns:
+        The response with reasoning traces removed and outer whitespace stripped.
+    """
+    if not text:
+        return text
+    if unclosed not in ("keep_text", "drop", "ignore"):
+        raise ValueError(f"Unknown unclosed policy: {unclosed!r}")
+
+    flags = re.DOTALL | (re.IGNORECASE if ignore_case else 0)
+    result = text
+    for start_tag, end_tag in tag_pairs:
+        # Remove complete (non-greedy) start...end blocks.
+        closed_re = re.compile(re.escape(start_tag) + r".*?" + re.escape(end_tag), flags)
+        result = closed_re.sub(replacement, result)
+
+        if unclosed == "drop":
+            # A start tag with no closing tag: drop it and everything after it.
+            unclosed_re = re.compile(re.escape(start_tag) + r".*\Z", flags)
+            result = unclosed_re.sub(replacement, result)
+        elif unclosed == "keep_text":
+            # Drop any leftover stray tags but keep the surrounding text.
+            for stray_tag in (start_tag, end_tag):
+                stray_re = re.compile(re.escape(stray_tag), re.IGNORECASE if ignore_case else 0)
+                result = stray_re.sub(replacement, result)
+
+    return result.strip()

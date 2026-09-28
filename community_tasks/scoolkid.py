@@ -76,6 +76,7 @@ from lighteval.metrics.metrics_sample import JudgeLLM
 from lighteval.metrics.utils.metric_utils import SampleLevelMetricGrouping
 from lighteval.tasks.lighteval_task import LightevalTaskConfig
 from lighteval.tasks.requests import Doc, SamplingMethod
+from lighteval.utils.utils import strip_reasoning
 
 
 logger = logging.getLogger(__name__)
@@ -550,7 +551,6 @@ _JUDGE_SYSTEM_PROMPT_ABSURD = _JUDGE_SYSTEM_PROMPT_TEMPLATE.format(
 # ── judge response parsing ─────────────────────────────────────────
 
 
-_THINK_RE = re.compile(r"<think>.*?</think>", re.DOTALL)
 # Primary: the MT-Bench-style [[VERDICT]] tag. Fallback: the bare word, in case
 # the judge drops the brackets.
 _VERDICT_RE = re.compile(r"\[\[\s*(PLAYED_ALONG|PUSHED_BACK)\s*\]\]", re.IGNORECASE)
@@ -558,7 +558,8 @@ _VERDICT_WORD_RE = re.compile(r"\b(PLAYED_ALONG|PUSHED_BACK)\b", re.IGNORECASE)
 
 
 def _strip_thinking(text: str) -> str:
-    return _THINK_RE.sub("", text).strip()
+    # Only complete <think>…</think> blocks are removed; stray tags are left as-is.
+    return strip_reasoning(text, unclosed="ignore")
 
 
 def _parse_verdict(text: str) -> bool | None:

@@ -96,6 +96,7 @@ from lighteval.metrics.metrics_sample import JudgeLLM
 from lighteval.metrics.utils.metric_utils import SampleLevelMetricGrouping
 from lighteval.tasks.lighteval_task import LightevalTaskConfig
 from lighteval.tasks.requests import Doc, SamplingMethod
+from lighteval.utils.utils import strip_reasoning
 
 
 logger = logging.getLogger(__name__)
@@ -164,22 +165,10 @@ def _is_english(line) -> bool:
 
 # Reasoning/thinking models (e.g. SmolLM3) wrap their chain-of-thought in
 # <think>…</think>. We judge only the final answer, so strip it before judging.
-_THINK_RE = re.compile(r"<think>.*?</think>", re.DOTALL)
-
-
+# Closed blocks are removed; an unclosed <think> keeps its text (only the tag is
+# dropped) so the judge still sees the reasoning start rather than an empty answer.
 def _strip_reasoning(text: str) -> str:
-    """Remove the model's <think> reasoning, leaving the final answer.
-
-    Closed <think>…</think> blocks are removed. If a <think> is left unclosed (the
-    reasoning was truncated by the generation limit, so there is no final answer),
-    the reasoning text is kept — only the tag is dropped — so the judge still sees
-    the reasoning start rather than an empty answer.
-    """
-    if not text:
-        return text
-    text = _THINK_RE.sub("", text)
-    text = text.replace("<think>", "").replace("</think>", "")
-    return text.strip()
+    return strip_reasoning(text, unclosed="keep_text")
 
 
 def pcbench_active_prompt(line, task_name: str | None = None) -> Doc:
