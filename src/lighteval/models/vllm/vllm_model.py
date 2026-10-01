@@ -40,6 +40,7 @@ from lighteval.models.thinking import (
     DEFAULT_THINKING_BUDGET,
     ThinkingGenSample,
     ensure_reasoning_tags_decodable,
+    reasoning_stop_config,
     resolve_is_thinking_model,
     resolve_reasoning_tags,
     two_phase_generate,
@@ -311,6 +312,17 @@ class VLLMModel(LightevalModel):
         )
         if self._tokenizer_mode == "mistral":
             logger.info("Detected a Mistral (tekken) model; using tokenizer_mode='mistral'.")
+            # transformers v5 loads these as a MistralCommonBackend tokenizer whose `.chat_template`
+            # is None (the template lives in mistral_common, applied natively), so `uses_chat_template`
+            # above wrongly returned False and would run the model in completion mode — wrong for these
+            # instruct/reasoning models (and it also disables thinking-model detection). They do have a
+            # working chat template, so enable it unless the user explicitly set override_chat_template.
+            if config.override_chat_template is None and not self.use_chat_template:
+                self.use_chat_template = True
+                logger.info(
+                    "Mistral tekken models carry a chat template via mistral_common; enabling "
+                    "use_chat_template (set override_chat_template=False to force completion mode)."
+                )
         self._tokenizer = self._create_auto_tokenizer(config)
 
         self._max_length = (
@@ -350,9 +362,13 @@ class VLLMModel(LightevalModel):
                 f"(thinking_budget={self.config.generation_parameters.thinking_budget or DEFAULT_THINKING_BUDGET}) "
                 f"and max_new_tokens/generation_size will apply only to the answer after {self.reasoning_tags[1]}."
             )
-            # vLLM decodes with skip_special_tokens=True by default: special reasoning tags would be
-            # stripped and break the two-phase stop/split, so fail fast instead of scoring garbage.
-            ensure_reasoning_tags_decodable(self.tokenizer, self.reasoning_tags, skip_special_tokens=True)
+            # vLLM decodes with skip_special_tokens=True by default, which strips special reasoning
+            # tags (e.g. Mistral [THINK]/[/THINK]) from the text. vLLM can still stop phase 1 on the
+            # tag's token id (see reasoning_stop_config), so that case is handled; fail fast only if
+            # the tag is stripped AND there is no token id to stop on.
+            ensure_reasoning_tags_decodable(
+                self.tokenizer, self.reasoning_tags, skip_special_tokens=True, token_id_stop_supported=True
+            )
 
         # Initialize cache for tokenization and predictions
         self._cache = SampleCache(config)
@@ -645,6 +661,9 @@ class VLLMModel(LightevalModel):
             inputs = self._truncate_context(inputs, truncation_budget)
 
             if self.is_thinking_model:
+                # Stop phase 1 on the end tag's token id (robust when decoding strips a special tag,
+                # e.g. Mistral [/THINK]) or, for string tags (</think>), fall back to the string stop.
+                close_tag_ids, stop_thinking_token_ids = reasoning_stop_config(self.tokenizer, self.reasoning_tags[1])
                 results.extend(
                     two_phase_generate(
                         inputs=inputs,
@@ -653,8 +672,9 @@ class VLLMModel(LightevalModel):
                         answer_budget=max_new_tokens,
                         num_samples=num_samples,
                         generate_fn=self._thinking_generate_fn,
-                        close_tag_ids=self.tokenizer.encode(self.reasoning_tags[1], add_special_tokens=False),
+                        close_tag_ids=close_tag_ids,
                         end_tag=self.reasoning_tags[1],
+                        stop_thinking_token_ids=stop_thinking_token_ids,
                     )
                 )
                 continue
@@ -687,17 +707,22 @@ class VLLMModel(LightevalModel):
         inputs: list[list[int]],
         max_new_tokens: Optional[int],
         stop_tokens: list[str],
+        stop_thinking_token_ids: list[int],
         num_samples: int,
     ) -> list[list[ThinkingGenSample]]:
         """Backend primitive for two_phase_generate (see lighteval.models.thinking).
 
-        vLLM already strips the stop string from both the text and the token ids, so the samples
-        it returns satisfy the "exclude the stop sequence" contract without extra work.
+        vLLM already strips the stop string and the stop token id from both the text and the token
+        ids, so the samples it returns satisfy the "exclude the stop sequence" contract without extra
+        work. ``stop_thinking_token_ids`` is only the reasoning end tag; it lets phase 1 stop on a
+        special end tag (e.g. Mistral ``[/THINK]``) that decoding would otherwise strip from the text.
+        It is fed to vLLM's native ``SamplingParams.stop_token_ids`` below.
         """
         outputs = self._generate(
             inputs=inputs,
             max_new_tokens=max_new_tokens,
             stop_tokens=stop_tokens,
+            stop_token_ids=stop_thinking_token_ids,
             returns_logits=False,
             num_samples=num_samples,
         )
@@ -711,6 +736,7 @@ class VLLMModel(LightevalModel):
         inputs: list[list[int]],
         max_new_tokens: Optional[int] = None,
         stop_tokens: Optional[list[str]] = None,
+        stop_token_ids: Optional[list[int]] = None,
         returns_logits: Optional[bool] = False,
         num_samples: int = 1,
         generate: bool = True,
@@ -722,6 +748,8 @@ class VLLMModel(LightevalModel):
             sampling_params.n = num_samples
             sampling_params.max_tokens = max_new_tokens
             sampling_params.stop = stop_tokens
+            if stop_token_ids:
+                sampling_params.stop_token_ids = stop_token_ids
             sampling_params.logprobs = 1 if returns_logits else 0
             if num_samples > 1 and sampling_params.temperature == 0:
                 raise ValueError(

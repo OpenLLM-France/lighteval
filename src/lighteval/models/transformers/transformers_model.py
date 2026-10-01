@@ -815,9 +815,14 @@ class TransformersModel(LightevalModel):
         inputs: list[list[int]],
         max_new_tokens: Optional[int],
         stop_tokens: list[str],
+        stop_thinking_token_ids: list[int],
         num_samples: int,
     ) -> list[list[ThinkingGenSample]]:
         """Backend primitive for two_phase_generate (see lighteval.models.thinking).
+
+        This backend stops on the end-tag *string* (``stop_thinking_token_ids`` is only used by backends that
+        support token-id stops; a model needing it is rejected up front by
+        ``ensure_reasoning_tags_decodable`` with token_id_stop_supported=False).
 
         Builds a left-padded batch from the raw token ids and runs the standard padded generation.
         _generate_padded already splits the decoded text at each stop string, so re-encoding that
