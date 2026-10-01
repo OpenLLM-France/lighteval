@@ -52,9 +52,10 @@ from lighteval.models.model_output import (
 )
 from lighteval.models.thinking import (
     DEFAULT_THINKING_BUDGET,
-    THINK_END_TAG,
     ThinkingGenSample,
+    ensure_reasoning_tags_decodable,
     resolve_is_thinking_model,
+    resolve_reasoning_tags,
     two_phase_generate,
 )
 from lighteval.models.utils import _get_dtype, _get_model_sha, _simplify_name, uses_chat_template
@@ -255,12 +256,18 @@ class TransformersModel(LightevalModel):
             config.enable_thinking,
             config.generation_parameters.thinking_budget is not None,
         )
+        # Reasoning tags this model actually emits (``<think>``/``</think>`` by default, or e.g.
+        # Mistral ``[THINK]``/``[/THINK]`` when declared as special tokens).
+        self.reasoning_tags = resolve_reasoning_tags(self.tokenizer)
         if self.is_thinking_model:
             logger.info(
                 "Detected a thinking model: reasoning will be generated with a separate budget "
                 f"(thinking_budget={self.config.generation_parameters.thinking_budget or DEFAULT_THINKING_BUDGET}) "
-                "and generation_size will apply only to the answer after </think>."
+                f"and generation_size will apply only to the answer after {self.reasoning_tags[1]}."
             )
+            # Special reasoning tags would be stripped when decoding with skip_special_tokens and
+            # break the two-phase stop/split, so fail fast instead of scoring garbage.
+            ensure_reasoning_tags_decodable(self.tokenizer, self.reasoning_tags, self.skip_special_tokens)
 
         # Initialize cache for tokenization and predictions
         self._cache = SampleCache(config)
@@ -335,6 +342,13 @@ class TransformersModel(LightevalModel):
             config.enable_thinking if config else None,
             config is not None and config.generation_parameters.thinking_budget is not None,
         )
+        # Reasoning tags this model actually emits (``<think>``/``</think>`` by default, or e.g.
+        # Mistral ``[THINK]``/``[/THINK]`` when declared as dedicated tokens).
+        self.reasoning_tags = resolve_reasoning_tags(self.tokenizer)
+        if self.is_thinking_model:
+            # Special reasoning tags would be stripped when decoding with skip_special_tokens and
+            # break the two-phase stop/split, so fail fast instead of scoring garbage.
+            ensure_reasoning_tags_decodable(self.tokenizer, self.reasoning_tags, self.skip_special_tokens)
 
         # Initialize cache for tokenization and predictions
         self._cache = SampleCache(config) if config else None
@@ -770,7 +784,8 @@ class TransformersModel(LightevalModel):
                             answer_budget=batch[0].generation_size,
                             num_samples=num_samples,
                             generate_fn=self._thinking_generate_fn,
-                            close_tag_ids=self.tokenizer.encode(THINK_END_TAG, add_special_tokens=False),
+                            close_tag_ids=self.tokenizer.encode(self.reasoning_tags[1], add_special_tokens=False),
+                            end_tag=self.reasoning_tags[1],
                         )
                     )
                     continue
