@@ -454,6 +454,9 @@ class NGramOverlapChecker(Instruction):
         """Checks if the response maintains a trigram overlap with the reference text within 2% of {percent}."""
         n = 3
         ngrams = set(nltk.ngrams(value, n))
+        if not ngrams:
+            # Response too short to contain any trigram: it cannot maintain the required overlap.
+            return False
         ref_ngrams = set(nltk.ngrams(self._reference_text, n))
         overlap = len(ngrams.intersection(ref_ngrams)) / len(ngrams)
         return self._percentage - 2 <= overlap * 100 <= self._percentage + 2
