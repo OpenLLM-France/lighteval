@@ -1174,6 +1174,7 @@ HF_REPO = os.getenv("LUCIOLE_RAG_HF_REPO", "Mvanypersele/luciole_rag_benchmark")
 DATASET_SUBSETS = [
     "hotpotqa",
     "hotpotqa_fr",
+    "hotpot_native_french",
     "tatqa",
     "piaf",
     "newsquadfr",
@@ -1185,6 +1186,7 @@ DATASET_SUBSETS = [
 DATASET_EVAL_SPLITS = {
     "hotpotqa": "validation",
     "hotpotqa_fr": "test",
+    "hotpot_native_french": "test",
     "tatqa": "test",
     "piaf": "test",
     "newsquadfr": "test",
@@ -1194,6 +1196,7 @@ DATASET_EVAL_SPLITS = {
 DATASET_AVAIL_SPLITS = {
     "hotpotqa": ["train", "validation"],
     "hotpotqa_fr": ["train", "test"],
+    "hotpot_native_french": ["test"],
     "tatqa": ["train", "validation", "test"],
     "piaf": ["train", "test"],
     "newsquadfr": ["train", "validation", "test"],
@@ -1234,4 +1237,36 @@ def _make_task(subset: str) -> LightevalTaskConfig:
     )
 
 
-TASKS_TABLE = [_make_task(s) for s in DATASET_SUBSETS]
+# openrag_bench conversion: a single-subset dataset built from the
+# ``Mvanypersele/openrag_bench`` parquet export (see
+# ``convert_openrag_to_luciole.py``). Point ``LUCIOLE_RAG_OPENRAG_HF_REPO`` at
+# the converted dataset -- either the local directory produced by the
+# conversion script or an uploaded HF repo. Natural unanswerable rows
+# (``answerable == False``) have an empty ``supporting_index`` and empty
+# ``answer``; the md5 drop-ratio partition still applies on top of them, so set
+# ``LUCIOLE_RAG_DROP_RATIO=0`` to keep only the natural unanswerables.
+OPENRAG_HF_REPO = os.getenv(
+    "LUCIOLE_RAG_OPENRAG_HF_REPO",
+    os.path.join(os.path.dirname(__file__), "openrag_bench_luciole"),
+)
+
+
+def _make_openrag_task() -> LightevalTaskConfig:
+    return LightevalTaskConfig(
+        name="luciole_rag:openrag_bench",
+        prompt_function=luciole_rag_prompt,
+        suite=["community"],
+        hf_repo=OPENRAG_HF_REPO,
+        hf_subset="default",
+        hf_avail_splits=["test"],
+        evaluation_splits=["test"],
+        few_shots_split=None,
+        few_shots_select=None,
+        metrics=_RAG_METRICS,
+        generation_size=GENERATION_SIZE,
+        stop_sequence=[],
+        version=2,
+    )
+
+
+TASKS_TABLE = [_make_task(s) for s in DATASET_SUBSETS] + [_make_openrag_task()]
