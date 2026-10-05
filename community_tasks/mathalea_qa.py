@@ -99,8 +99,9 @@ def normalize_french_math(text: str) -> str:
     - decimal comma (82,5 or 82{,}5) → decimal point; a comma followed by a space, or inside a set
       written without ";" (\\{-3,3\\}), is kept as a separator
     - thousands separators (1 234 567, 1\\,234\\,567) and grouped decimals (0,000 008 1) are removed
-    - units the instruction asks to omit (€, cm²...) are dropped
-    - \\varnothing → \\emptyset, "S = ..." solution-set prefix dropped, {(x;y)} → (x;y),
+    - units the instruction asks to omit (€, cm²...) and % signs are dropped
+    - "pas de solution"/"aucune solution", ∅ and \\varnothing → \\emptyset; \\pm a → \\{-a ; a\\}
+    - "S = ..." solution-set prefix dropped, {(x;y)} → (x;y),
       "et"/"ou" between values → ";"
     """
     text = _DECIMAL_GROUPS_RE.sub(lambda m: re.sub(r"\s|\\,|~", "", m.group(0)), text)
@@ -110,7 +111,11 @@ def normalize_french_math(text: str) -> str:
     text = re.sub(r"\\\{[^{};]*\\\}", lambda m: re.sub(r",(?=\S)", ", ", m.group(0)), text)
     text = re.sub(r"(\d),(?=\d)", r"\1.", text)
     text = _UNIT_RE.sub("", text)
-    text = text.replace("\\varnothing", "\\emptyset")
+    # Percentages are asked as "... = ...%": compare the number of percent, not its value (30% ≠ 30 otherwise)
+    text = re.sub(r"\s*\\?%", "", text)
+    text = re.sub(r"(?:\\text\{\s*)?\b(?:pas de|aucune) solutions?\b\.?(?:\s*\})?", "\\\\emptyset", text, flags=re.I)
+    text = text.replace("\\varnothing", "\\emptyset").replace("∅", "\\emptyset")
+    text = re.sub(r"\\pm\s*(\\sqrt\{[^{}]+\}|\\frac\{[^{}]+\}\{[^{}]+\}|\d+(?:\.\d+)?)", r"\\{-\1 ; \1\\}", text)
     text = re.sub(r"(?<![a-zA-Z\\])(?:\\mathcal\{S\}|S)\s*=\s*", "", text)
     text = _SINGLE_TUPLE_SET_RE.sub(r"(\1)", text)
     text = re.sub(r"\\text\{\s*(?:et|ou)\s*\}", ";", text)
