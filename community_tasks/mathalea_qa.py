@@ -28,7 +28,7 @@ dataset:
 cea-list-ia/MathAleaQA-1K
 
 abstract:
-MathAleaQA-1K is an open-answer benchmark of 1000 French math exercises, from CM1 to terminale,
+MathAleaQA-1K is an open-answer benchmark of 1000 French math exercises, from sixième to terminale,
 drawn from the held-out exercise types of the MathAléa SFT test split. Only exercise types whose
 answers can be checked symbolically were kept (numbers, fractions, percentages, expressions,
 solution sets and points), and each reference answer was cross-checked against its worked solution.
@@ -58,7 +58,7 @@ from lighteval.tasks.requests import Doc
 from lighteval.utils.language import Language
 
 
-LEVELS = ["CM1_CM2", "sixième", "cinquième", "quatrième", "troisième", "seconde", "première", "terminale"]
+LEVELS = ["sixième", "cinquième", "quatrième", "troisième", "seconde", "première", "terminale"]
 
 
 def remove_accents(text: str) -> str:
@@ -176,7 +176,6 @@ def _make_task(subset, alias, prompt_key):
         suite=["community"],
         hf_repo="cea-list-ia/MathAleaQA-1K",
         hf_subset="default",
-        hf_revision="702fb96dcf0e3c822a85c3afca24e8929473978a",
         hf_filter=None if subset == "all" else (lambda line, level=subset: line["level"] == level),
         hf_avail_splits=["dev", "test"],
         evaluation_splits=["test"],
