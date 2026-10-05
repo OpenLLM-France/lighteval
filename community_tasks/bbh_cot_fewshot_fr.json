@@ -1,3 +1,488 @@
-version https://git-lfs.github.com/spec/v1
-oid sha256:3094a5c608b6573b63fd1b3ab4c929199db046e664ef548cdcf62ad406574ed2
-size 67481
+{
+ "boolean_expressions": {
+  "description": "Évaluez le résultat d'une expression booléenne aléatoire.\n\n",
+  "doc_to_text": "Q : {{input}}\nR : Réfléchissons étape par étape.\n",
+  "samples": [
+   {
+    "input": "pas ( ( pas pas Vrai ) ) est",
+    "target": "Rappelons que (i) les expressions entre parenthèses sont toujours évaluées en premier et que (ii) l'ordre de priorité des opérateurs, du plus prioritaire au moins prioritaire, est \"pas\", \"et\", \"ou\".\nOn simplifie l'expression \"Z\" : \"Z = pas ( ( pas pas Vrai ) ) = pas ( ( A ) )\" avec \"A = pas pas Vrai\".\nÉvaluons A : A = pas pas Vrai = pas (pas Vrai) = pas Faux = Vrai.\nEn remplaçant A : Z = pas ( ( Vrai ) ) = pas Vrai = Faux. Donc la réponse est Incorrect."
+   },
+   {
+    "input": "Vrai et Faux et pas Vrai et Vrai est",
+    "target": "Rappelons que (i) les expressions entre parenthèses sont évaluées en premier et que (ii) l'ordre de priorité est \"pas\", \"et\", \"ou\".\nOn écrit \"Z = Vrai et Faux et pas Vrai et Vrai = A et B\" avec \"A = Vrai et Faux\" et \"B = pas Vrai et Vrai\".\nÉvaluons A : A = Vrai et Faux = Faux.\nÉvaluons B : B = pas Vrai et Vrai = (pas Vrai) et Vrai = Faux et Vrai = Faux.\nEn remplaçant : Z = A et B = Faux et Faux = Faux. Donc la réponse est Incorrect."
+   },
+   {
+    "input": "pas pas ( pas ( Faux ) ) est",
+    "target": "Rappelons que (i) les expressions entre parenthèses sont évaluées en premier et que (ii) l'ordre de priorité est \"pas\", \"et\", \"ou\".\nOn écrit \"Z = pas pas ( pas ( Faux ) ) = pas pas ( A )\" avec \"A = pas ( Faux )\".\nÉvaluons A : A = pas ( Faux ) = pas Faux = Vrai.\nEn remplaçant A : Z = pas pas ( Vrai ) = pas (pas Vrai) = pas Faux = Vrai. Donc la réponse est Vrai."
+   }
+  ]
+ },
+ "causal_judgement": {
+  "description": "Répondez à des questions d'attribution causale.\n\n",
+  "doc_to_text": "Q : {{input}}\nR : Réfléchissons étape par étape.\n",
+  "samples": [
+   {
+    "input": "Comment une personne ordinaire répondrait-elle à la question de causalité suivante ?\nFrank T. était en conflit de longue date avec son voisin au sujet d'une parcelle de terrain et, un jour, il décide de tirer sur son voisin. Frank T. n'a aucune expérience des armes à feu, sa main glisse sur le canon et le coup part de travers. Néanmoins, la balle ricoche sur un gros rocher situé à quelques mètres et atteint le corps du voisin, causant une blessure grave. Frank T. a-t-il tiré intentionnellement sur son voisin ?\nOptions :\n- Oui\n- Non",
+    "target": "On nous dit que \"Frank T. n'a aucune expérience des armes à feu, sa main a glissé et le coup est parti de travers\". Une personne ordinaire en déduirait que Frank T. n'avait pas l'intention de blesser quelqu'un et que la balle a atteint le voisin par accident ; on conclut donc qu'il n'a pas tiré intentionnellement sur son voisin. Donc la réponse est Non."
+   },
+   {
+    "input": "Comment une personne ordinaire répondrait-elle à la question de causalité suivante ?\nSuzy et Billy travaillent sur un projet essentiel. Leur chef leur dit à tous les deux : \"Soyez ici à 9 h précises, c'est absolument indispensable.\" Billy et Suzy arrivent tous les deux à 9 h. Or, un détecteur de mouvement avait été installé dans la pièce ; il se déclenche dès qu'au moins une personne s'y trouve. Le détecteur s'est déclenché. Billy a-t-il causé le déclenchement du détecteur ?\nOptions :\n- Oui\n- Non",
+    "target": "Comme le chef a demandé aux deux d'arriver en même temps, une personne ordinaire comprendrait que le déclenchement dépend de la présence des deux personnes. Puisque le détecteur s'est déclenché, elle conclurait que Suzy et Billy l'ont tous deux déclenché ; Billy a donc bien causé le déclenchement. Donc la réponse est Oui."
+   },
+   {
+    "input": "Comment une personne ordinaire répondrait-elle à la question de causalité suivante ?\nGeorge et sa sœur Lena se retrouvent chez leurs parents. George vient d'être admis en médecine ; Lena est malheureuse et vient de perdre son emploi. Ils jouent aux fléchettes ; la partie décisive se joue sur le dernier lancer de George : s'il vise la zone de faible score, Lena gagne. Pensant aux difficultés de Lena, George veut la laisser gagner et vise volontairement la zone de faible score ; la fléchette s'y plante et Lena gagne. George a-t-il visé la zone de faible score intentionnellement ?\nOptions :\n- Oui\n- Non",
+    "target": "On nous dit que \"George vise la zone de faible score\". Une personne ordinaire penserait donc qu'il l'a fait intentionnellement, car il voulait remonter le moral de sa sœur Lena. Donc la réponse est Oui."
+   }
+  ]
+ },
+ "navigate": {
+  "description": "À partir d'une série d'instructions de navigation, déterminez si l'on revient au point de départ.\n\n",
+  "doc_to_text": "Q : {{input}}\nR : Réfléchissons étape par étape.\n",
+  "samples": [
+   {
+    "input": "Si vous suivez ces instructions, revenez-vous au point de départ ? Tournez à gauche. Faites demi-tour. Tournez à gauche. Faites 7 pas. Faites 2 pas. Faites 4 pas. Faites 8 pas.\nOptions :\n- Oui\n- Non",
+    "target": "On part de l'origine (0, 0), face à l'axe des y positifs.\n(1) Tournez à gauche : (0, 0), face à l'axe des x négatifs.\n(2) Faites demi-tour : (0, 0), face à l'axe des x positifs.\n(3) Tournez à gauche : (0, 0), face à l'axe des y positifs.\n(4) Faites 7 pas : (0, 7).\n(5) Faites 2 pas : (0, 9).\n(6) Faites 4 pas : (0, 13).\n(7) Faites 8 pas : (0, 21).\nComme (0, 21) n'est pas (0, 0), on n'est pas revenu au départ. Donc la réponse est Non."
+   },
+   {
+    "input": "Si vous suivez ces instructions, revenez-vous au point de départ ? Faites demi-tour. Faites 1 pas. Faites 6 pas. Faites demi-tour. Faites 6 pas. Faites 9 pas. Faites 1 pas.\nOptions :\n- Oui\n- Non",
+    "target": "On part de l'origine (0, 0), face à l'axe des y positifs.\n(1) Faites demi-tour : (0, 0), face à l'axe des y négatifs.\n(2) Faites 1 pas : (0, -1).\n(3) Faites 6 pas : (0, -7).\n(4) Faites demi-tour : (0, -7), face à l'axe des y positifs.\n(5) Faites 6 pas : (0, -1).\n(6) Faites 9 pas : (0, 8).\n(7) Faites 1 pas : (0, 9).\nComme (0, 9) n'est pas (0, 0), on n'est pas revenu au départ. Donc la réponse est Non."
+   },
+   {
+    "input": "Si vous suivez ces instructions, revenez-vous au point de départ ? Restez toujours face à l'avant. Faites 2 pas à droite. Faites 9 pas à gauche. Faites 7 pas à droite.\nOptions :\n- Oui\n- Non",
+    "target": "On part de l'origine (0, 0), face à l'axe des y positifs.\n(1) Restez face à l'avant : (0, 0).\n(2) 2 pas à droite : (0, 2).\n(3) 9 pas à gauche : (0, -7).\n(4) 7 pas à droite : (0, 0).\nComme (0, 0) est bien (0, 0), on est revenu au point de départ. Donc la réponse est Oui."
+   }
+  ]
+ },
+ "sports_understanding": {
+  "description": "Déterminez si une phrase construite artificiellement à propos du sport est plausible ou non.\n\n",
+  "doc_to_text": "Q : {{input}}\nR : Réfléchissons étape par étape.\n",
+  "samples": [
+   {
+    "input": "La phrase suivante est-elle plausible ? \"Bam Adebayo a réussi un reverse layup lors des finales de la Conférence Ouest.\"",
+    "target": "Bam Adebayo est un joueur de basket-ball américain. Réussir un reverse layup lors des finales de la Conférence Ouest fait partie de la NBA. Donc la réponse est Oui."
+   },
+   {
+    "input": "La phrase suivante est-elle plausible ? \"Santi Cazorla a marqué un touchdown.\"",
+    "target": "Santi Cazorla est un footballeur. Le touchdown appartient au football américain et au rugby. Donc la réponse est Non."
+   },
+   {
+    "input": "La phrase suivante est-elle plausible ? \"DeMar DeRozan a été sanctionné pour goaltending.\"",
+    "target": "DeMar DeRozan est un joueur de basket-ball américain. Le goaltending fait partie du basket-ball. Donc la réponse est Oui."
+   }
+  ]
+ },
+ "web_of_lies": {
+  "description": "Évaluez une fonction booléenne aléatoire exprimée sous forme de problème.\n\n",
+  "doc_to_text": "Q : {{input}}\nR : Réfléchissons étape par étape.\n",
+  "samples": [
+   {
+    "input": "Question : Fidel dit la vérité. Jerry dit que Fidel dit la vérité. Vina dit que Jerry dit la vérité. Millicent dit que Vina ment. Raymond dit que Millicent ment. Raymond dit-il la vérité ?",
+    "target": "(1) Fidel dit la vérité. Donc Fidel dit la vérité.\n(2) Jerry dit que Fidel dit la vérité. Comme Fidel dit la vérité (1), Jerry dit la vérité.\n(3) Vina dit que Jerry dit la vérité. Comme Jerry dit la vérité (2), Vina dit la vérité.\n(4) Millicent dit que Vina ment. Comme Vina dit la vérité (3), Millicent ment.\n(5) Raymond dit que Millicent ment. Comme Millicent ment (4), Raymond dit la vérité.\nDonc la réponse est Oui."
+   },
+   {
+    "input": "Question : Kristian ment. Millie dit que Kristian ment. Maybelle dit que Millie dit la vérité. Fidel dit que Maybelle ment. Leda dit que Fidel ment. Leda dit-elle la vérité ?",
+    "target": "(1) Kristian ment. Donc Kristian ment.\n(2) Millie dit que Kristian ment. Comme Kristian ment (1), Millie dit la vérité.\n(3) Maybelle dit que Millie dit la vérité. Comme Millie dit la vérité (2), Maybelle dit la vérité.\n(4) Fidel dit que Maybelle ment. Comme Maybelle dit la vérité (3), Fidel ment.\n(5) Leda dit que Fidel ment. Comme Fidel ment (4), Leda dit la vérité.\nDonc la réponse est Oui."
+   },
+   {
+    "input": "Question : Kristian dit la vérité. Michaela dit que Kristian ment. Raymond dit que Michaela dit la vérité. Osvaldo dit que Raymond dit la vérité. Jamey dit qu'Osvaldo dit la vérité. Jamey dit-il la vérité ?",
+    "target": "(1) Kristian dit la vérité. Donc Kristian dit la vérité.\n(2) Michaela dit que Kristian ment. Comme Kristian dit la vérité (1), Michaela ment.\n(3) Raymond dit que Michaela dit la vérité. Comme Michaela ment (2), Raymond ment.\n(4) Osvaldo dit que Raymond dit la vérité. Comme Raymond ment (3), Osvaldo ment.\n(5) Jamey dit qu'Osvaldo dit la vérité. Comme Osvaldo ment (4), Jamey ment.\nDonc la réponse est Non."
+   }
+  ]
+ },
+ "object_counting": {
+  "description": "Questions qui consistent à énumérer des objets et à les compter.\n\n",
+  "doc_to_text": "Q : {{input}}\nR : Réfléchissons étape par étape.\n",
+  "samples": [
+   {
+    "input": "J'ai une mûre, une clarinette, une nectarine, une prune, une fraise, une banane, une flûte, une orange et un violon. Combien de fruits ai-je ?",
+    "target": "Identifions d'abord les fruits de la liste avec leur quantité entre parenthèses :\n- mûre (1)\n- nectarine (1)\n- prune (1)\n- fraise (1)\n- banane (1)\n- orange (1)\nAdditionnons les nombres entre parenthèses : 1 + 1 + 1 + 1 + 1 + 1 = 6. Donc la réponse est 6."
+   },
+   {
+    "input": "J'ai une orange, une framboise, deux pêches, une mûre, une pomme, un raisin, une nectarine et trois prunes. Combien de fruits ai-je ?",
+    "target": "Identifions les fruits avec leur quantité entre parenthèses :\n- orange (1)\n- framboise (1)\n- pêches (2)\n- mûre (1)\n- pomme (1)\n- raisin (1)\n- nectarine (1)\n- prunes (3)\nAdditionnons : 1 + 1 + 2 + 1 + 1 + 1 + 1 + 3 = 11. Donc la réponse est 11."
+   },
+   {
+    "input": "J'ai une laitue, un brocoli, un oignon, une branche de céleri, deux carottes, une gousse d'ail et une igname. Combien de légumes ai-je ?",
+    "target": "Identifions les légumes avec leur quantité entre parenthèses :\n- laitue (1)\n- brocoli (1)\n- oignon (1)\n- céleri (1)\n- carottes (2)\n- ail (1)\n- igname (1)\nAdditionnons : 1 + 1 + 1 + 1 + 2 + 1 + 1 = 8. Donc la réponse est 8."
+   }
+  ]
+ },
+ "multistep_arithmetic_two": {
+  "description": "Résolvez des problèmes arithmétiques à plusieurs étapes.\n\n",
+  "doc_to_text": "Q : {{input}}\nR : Réfléchissons étape par étape.\n",
+  "samples": [
+   {
+    "input": "((-5 + 9 * -4 - 0) * (4 + -7 + 0 * -5)) =",
+    "target": "Rappelons l'ordre des opérations : (1) parenthèses, (2) puissances, (3) multiplications et divisions (de gauche à droite), (4) additions et soustractions (de gauche à droite). On calcule donc d'abord l'intérieur des parenthèses.\nL'expression s'écrit \"A * B\", avec A = (-5 + 9 * -4 - 0) et B = (4 + -7 + 0 * -5).\nA = (-5 + (9 * -4) - 0) = (-5 + (-36) - 0) = -41.\nB = (4 + -7 + (0 * -5)) = (4 + -7 + 0) = -3.\nAlors A * B = -41 * -3 = 123. Donc la réponse est 123."
+   },
+   {
+    "input": "((-9 * 7 * 7 * -9) + (4 * -9 - 8 - -4)) =",
+    "target": "Rappelons l'ordre des opérations : parenthèses, puissances, multiplications/divisions, puis additions/soustractions.\nL'expression s'écrit \"A + B\", avec A = (-9 * 7 * 7 * -9) et B = (4 * -9 - 8 - -4).\nA = ((-9 * 7) * (7 * -9)) = ((-63) * (-63)) = 3969.\nB = ((4 * -9) - 8 - (-4)) = ((-36) - 8 + 4) = -40.\nAlors A + B = 3969 + -40 = 3929. Donc la réponse est 3929."
+   },
+   {
+    "input": "((-3 + 5 * 8 * -4) - (9 - 8 * -7 + -9)) =",
+    "target": "Rappelons l'ordre des opérations : parenthèses, puissances, multiplications/divisions, puis additions/soustractions.\nL'expression s'écrit \"A - B\", avec A = (-3 + 5 * 8 * -4) et B = (9 - 8 * -7 + -9).\nA = (-3 + ((5 * 8) * -4)) = (-3 + (40 * -4)) = (-3 + -160) = -163.\nB = (9 - (8 * -7) + -9) = (9 - (-56) - 9) = (9 + 56 - 9) = 56.\nAlors A - B = -163 - 56 = -219. Donc la réponse est -219."
+   }
+  ]
+ },
+ "date_understanding": {
+  "description": "Déduisez la date à partir du contexte.\n\n",
+  "doc_to_text": "Q : {{input}}\nR : Réfléchissons étape par étape.\n",
+  "samples": [
+   {
+    "input": "Nous sommes aujourd'hui la veille de Noël 1937. Quelle est la date il y a 10 jours au format MM/JJ/AAAA ?\nOptions :\n(A) 12/14/2026\n(B) 12/14/1950\n(C) 12/14/2007\n(D) 12/14/1937\n(E) 07/14/1938\n(F) 12/14/1988",
+    "target": "Si nous sommes la veille de Noël 1937, alors la date d'aujourd'hui est le 24 décembre 1937. Il y a 10 jours, c'était le 14 décembre 1937, soit 12/14/1937. Donc la réponse est (D)."
+   },
+   {
+    "input": "Demain, nous serons le 11/12/2019 (au format MM/JJ/AAAA). Quelle est la date il y a un an à partir d'aujourd'hui au format MM/JJ/AAAA ?\nOptions :\n(A) 09/04/2018\n(B) 11/11/2018\n(C) 08/25/2018\n(D) 11/02/2018\n(E) 11/04/2018",
+    "target": "Si demain est le 11/12/2019, alors aujourd'hui est le 11/11/2019. La date il y a un an à partir d'aujourd'hui est le 11/11/2018. Donc la réponse est (B)."
+   },
+   {
+    "input": "Jane et John se sont mariés le 2 janvier 1958. C'est aujourd'hui leur 5e anniversaire de mariage. Quelle est la date de demain au format MM/JJ/AAAA ?\nOptions :\n(A) 01/11/1961\n(B) 01/03/1963\n(C) 01/18/1961\n(D) 10/14/1960\n(E) 01/03/1982\n(F) 12/03/1960",
+    "target": "Si Jane et John se sont mariés le 2 janvier 1958 et que c'est aujourd'hui leur 5e anniversaire, alors la date d'aujourd'hui est le 2 janvier 1963. La date de demain est le 3 janvier 1963, soit 01/03/1963. Donc la réponse est (B)."
+   }
+  ]
+ },
+ "geometric_shapes": {
+  "description": "Nommez des formes géométriques à partir de leur tracé SVG.\n\n",
+  "doc_to_text": "Q : {{input}}\nR : Réfléchissons étape par étape.\n",
+  "samples": [
+   {
+    "input": "Cet élément de tracé SVG <path d=\"M 31.00,73.00 L 32.00,59.00 L 44.00,50.00 L 49.00,41.00 L 64.00,37.00 L 71.00,55.00 L 64.00,76.00 L 52.00,61.00 L 31.00,73.00\"/> dessine\nOptions :\n(A) cercle\n(B) heptagone\n(C) hexagone\n(D) cerf-volant\n(E) ligne\n(F) octogone\n(G) pentagone\n(H) rectangle\n(I) secteur\n(J) triangle",
+    "target": "Cet élément de tracé SVG contient des commandes « M » et « L ». M prend deux paramètres (x,y) et déplace le point courant en (x,y). L prend deux paramètres (x,y) et trace une ligne du point précédent au nouveau point (x,y).\nCe tracé se décompose en 9 commandes.\n(1) M 31.00,73.00 : déplace le point courant en 31.00,73.00.\n(2) L 32.00,59.00 : ligne de 31.00,73.00 à 32.00,59.00.\n(3) L 44.00,50.00 : ligne de 32.00,59.00 à 44.00,50.00.\n(4) L 49.00,41.00 : ligne de 44.00,50.00 à 49.00,41.00.\n(5) L 64.00,37.00 : ligne de 49.00,41.00 à 64.00,37.00.\n(6) L 71.00,55.00 : ligne de 64.00,37.00 à 71.00,55.00.\n(7) L 64.00,76.00 : ligne de 71.00,55.00 à 64.00,76.00.\n(8) L 52.00,61.00 : ligne de 64.00,76.00 à 52.00,61.00.\n(9) L 31.00,73.00 : ligne de 52.00,61.00 à 31.00,73.00.\nCe tracé part de 31.00,73.00, crée huit lignes consécutives et jointives, puis revient à son point de départ, formant une figure à huit côtés, sans courbe ni arc. « octogone » est le seul objet à huit côtés de la liste. Donc la réponse est (F)."
+   },
+   {
+    "input": "Cet élément de tracé SVG <path d=\"M 14.19,26.04 L 51.43,39.21 L 58.44,36.69 L 56.63,30.17 L 48.53,26.66 L 14.19,26.04\"/> dessine\nOptions :\n(A) cercle\n(B) heptagone\n(C) hexagone\n(D) cerf-volant\n(E) ligne\n(F) octogone\n(G) pentagone\n(H) rectangle\n(I) secteur\n(J) triangle",
+    "target": "Cet élément de tracé SVG contient des commandes « M » et « L ». M déplace le point courant en (x,y) ; L trace une ligne du point précédent au nouveau point (x,y).\nCe tracé se décompose en 6 commandes.\n(1) M 14.19,26.04 : déplace le point courant en 14.19,26.04.\n(2) L 51.43,39.21 : ligne de 14.19,26.04 à 51.43,39.21.\n(3) L 58.44,36.69 : ligne de 51.43,39.21 à 58.44,36.69.\n(4) L 56.63,30.17 : ligne de 58.44,36.69 à 56.63,30.17.\n(5) L 48.53,26.66 : ligne de 56.63,30.17 à 48.53,26.66.\n(6) L 14.19,26.04 : ligne de 48.53,26.66 à 14.19,26.04.\nCe tracé part de 14.19,26.04, crée cinq lignes consécutives et jointives, puis revient à son point de départ, formant une figure à cinq côtés, sans courbe ni arc. « pentagone » est le seul polygone à cinq côtés de la liste. Donc la réponse est (G)."
+   },
+   {
+    "input": "Cet élément de tracé SVG <path d=\"M 41.00,43.00 L 37.00,34.00 L 41.00,33.00 L 45.00,34.00 L 41.00,43.00\"/> dessine\nOptions :\n(A) cercle\n(B) heptagone\n(C) hexagone\n(D) cerf-volant\n(E) ligne\n(F) octogone\n(G) pentagone\n(H) rectangle\n(I) secteur\n(J) triangle",
+    "target": "Cet élément de tracé SVG contient des commandes « M » et « L ». M déplace le point courant en (x,y) ; L trace une ligne du point précédent au nouveau point (x,y).\nCe tracé se décompose en 5 commandes.\n(1) M 41.00,43.00 : déplace le point courant en 41.00,43.00.\n(2) L 37.00,34.00 : ligne de 41.00,43.00 à 37.00,34.00.\n(3) L 41.00,33.00 : ligne de 37.00,34.00 à 41.00,33.00.\n(4) L 45.00,34.00 : ligne de 41.00,33.00 à 45.00,34.00.\n(5) L 41.00,43.00 : ligne de 45.00,34.00 à 41.00,43.00.\nCe tracé part de 41.00,43.00, crée quatre lignes consécutives et jointives, puis revient à son point de départ, formant une figure à quatre côtés. « cerf-volant » et « rectangle » sont les deux seuls polygones à quatre côtés de la liste ; il faut déterminer lequel convient.\nUn cerf-volant a deux paires de côtés adjacents de même longueur, tandis qu'un rectangle a deux paires de côtés opposés de même longueur. Vérifions les longueurs des côtés.\nCôté A : |A| = sqrt((41-37)^2 + (43-34)^2) = sqrt(16 + 81) = sqrt(97).\nCôté B : |B| = sqrt((37-41)^2 + (34-33)^2) = sqrt(16 + 1) = sqrt(17).\nCôté C : |C| = sqrt((41-45)^2 + (33-34)^2) = sqrt(16 + 1) = sqrt(17).\nCôté D : |D| = sqrt((45-41)^2 + (34-43)^2) = sqrt(16 + 81) = sqrt(97).\nOn a |A| = |D| et |B| = |C|, avec A adjacent à D et B adjacent à C : deux paires de côtés adjacents de même longueur, c'est donc un « cerf-volant ». Donc la réponse est (D)."
+   }
+  ]
+ },
+ "movie_recommendation": {
+  "description": "Recommandez des films similaires à la liste de films donnée.\n\n",
+  "doc_to_text": "Q : {{input}}\nR : Réfléchissons étape par étape.\n",
+  "samples": [
+   {
+    "input": "Trouvez un film similaire à Star Wars Episode IV - A New Hope, Indiana Jones and the Last Crusade, Star Wars Episode V - The Empire Strikes Back, The Big Lebowski :\nOptions :\n(A) Tetsuo\n(B) the Ironman\n(C) The Princess Bride\n(D) The Barkley Marathons The Race That Eats Its Young\n(E) Bug",
+    "target": "- Star Wars Episode IV - A New Hope (action, aventure, fantastique ; 1977)\n- Indiana Jones and the Last Crusade (action, aventure ; 1989)\n- Star Wars Episode V - The Empire Strikes Back (action, aventure, fantastique ; 1980)\n- The Big Lebowski (action, drame, comédie ; 1998)\nCe sont tous de célèbres films américains classiques sortis avant 2000. Parmi les options, le seul film similaire semble être The Princess Bride (1987). Donc la réponse est (C)."
+   },
+   {
+    "input": "Trouvez un film similaire à Twister, The Silence of the Lambs, Independence Day, Braveheart :\nOptions :\n(A) They Shoot Horses\n(B) Don't They\n(C) Forrest Gump\n(D) The Salton Sea\n(E) Extreme Days",
+    "target": "- Twister (action, aventure, thriller ; 1996)\n- The Silence of the Lambs (policier, drame, thriller ; 1991)\n- Independence Day (action, science-fiction, drame ; 1996)\n- Braveheart (biographie, drame, épopée ; 1995)\nCe sont tous de célèbres films hollywoodiens sortis autour des années 1990. Parmi les options, le seul film similaire semble être Forrest Gump (comédie, drame, romance ; 1994). Donc la réponse est (C)."
+   },
+   {
+    "input": "Trouvez un film similaire à Minority Report, Total Recall, Inside Out, Forrest Gump :\nOptions :\n(A) Phenomena\n(B) Lilting\n(C) Catwoman\n(D) Edge of Tomorrow",
+    "target": "- Minority Report (action, policier, mystère ; 2002)\n- Total Recall (action, aventure, science-fiction ; 2012)\n- Inside Out (animation, famille, comédie ; 2015)\n- Forrest Gump (comédie, drame, romance ; 1994)\nCe sont tous de célèbres films sortis au cours des dernières décennies. Parmi les options, le seul film similaire semble être Edge of Tomorrow (action, aventure, science-fiction ; 2014), car c'est également un film de science-fiction avec Tom Cruise. Donc la réponse est (D)."
+   }
+  ]
+ },
+ "ruin_names": {
+  "description": "Choisissez la modification humoristique qui « gâche » le nom de film ou d'artiste donné.\n\n",
+  "doc_to_text": "Q : {{input}}\nR : Réfléchissons étape par étape.\n",
+  "samples": [
+   {
+    "input": "Laquelle des propositions suivantes est une modification humoristique du nom d'artiste ou de film « whitesnake » ?\nOptions :\n(A) whitesnape\n(B) whitesnapke\n(C) whitesnuake\n(D) mwhitesnake",
+    "target": "Le nom d'origine est « whitesnake ». C'est le nom d'un vieux groupe de hard rock anglais. C'est un mot composé de « white » et « snake ».\n(A) « whitesnape » : « snake » est changé en « snape », qui renvoie au personnage de fiction Severus Snape dans la série Harry Potter ; (A) est donc une modification sensée et amusante.\n(B) « whitesnapke » : « snapke » n'est pas un mot réel ; « whitesnapke » n'est donc pas drôle.\n(C) « whitesnuake » : « snuake » n'est pas un mot réel ; « whitesnuake » n'est donc pas drôle.\n(D) « mwhitesnake » : le préfixe « m- » paraît arbitraire ; « mwhitesnake » n'est ni sensé ni drôle.\nLa seule modification humoristique est (A). Donc la réponse est (A)."
+   },
+   {
+    "input": "Laquelle des propositions suivantes est une modification humoristique du nom d'artiste ou de film « one of our dinosaurs is missing » ?\nOptions :\n(A) ofne of our dinosaurs is missing\n(B) one af our dinosaurs is missing\n(C) one of our dinosaurs is pissing\n(D) one of our dinosaur is missing",
+    "target": "Le nom d'origine est « one of our dinosaurs is missing ». C'est le nom d'un vieux film britannique.\n(A) « ofne of our dinosaurs is missing » : « one of » devient « ofne », mais « ofne » n'est pas un mot réel.\n(B) « one af our dinosaurs is missing » : « of » devient « af », mais « af » n'est pas un mot réel.\n(C) « one of our dinosaurs is pissing » : « missing » devient « pissing », ce qui est une modification vraiment fantaisiste et espiègle qui gâche le titre du film.\n(D) « one of our dinosaur is missing » : « dinosaurs » devient « dinosaur », mais le singulier devrait être pluriel dans le titre ; ce changement paraît arbitraire et n'est pas drôle.\nLa seule modification humoristique est (C). Donc la réponse est (C)."
+   },
+   {
+    "input": "Laquelle des propositions suivantes est une modification humoristique du nom d'artiste ou de film « counting crows » ?\nOptions :\n(A) countingy crows\n(B) counting cows\n(C) courting crows\n(D) coutnting crows",
+    "target": "Le nom d'origine est « counting crows ». C'est le nom d'un groupe de rock américain, dont le nom vient de la comptine britannique « One for Sorrow », qui parle de compter les pies.\n(A) « countingy crows » : « counting » devient « countingy », qui n'est pas un mot réel.\n(B) « counting cows » : « crows » devient « cows », une modification amusante et sensée qui gâche le nom du groupe.\n(C) « courting crows » : « counting » devient « courting », un mot réel, mais « courting crows » sonne moins drôle que « counting cows ».\n(D) « coutnting crows » : « counting » devient « coutnting », qui n'est pas un mot réel.\nLa seule modification humoristique est (B). Donc la réponse est (B)."
+   }
+  ]
+ },
+ "temporal_sequences": {
+  "description": "Description de la tâche : répondez à des questions sur les moments où certains événements ont pu se produire.\n\n",
+  "doc_to_text": "Q : {{input}}\nR : Réfléchissons étape par étape.\n",
+  "samples": [
+   {
+    "input": "Aujourd'hui, Emily est allée au musée. Entre quelles heures a-t-elle pu y aller ?\nNous savons que :\nEmily s'est réveillée à 13h.\nElizabeth a vu Emily lire à la bibliothèque de 14h à 16h.\nJessica a vu Emily regarder un film au cinéma de 16h à 17h.\nLeslie a vu Emily attendre à l'aéroport de 17h à 18h.\nWilliam a vu Emily acheter des vêtements au centre commercial de 18h à 19h.\nLe musée était fermé après 19h.\nEntre quelles heures Emily a-t-elle pu aller au musée ?\nOptions :\n(A) de 13h à 14h\n(B) de 18h à 19h\n(C) de 17h à 18h\n(D) de 14h à 16h",
+    "target": "Heure de réveil : 13h.\n13h-14h : libre.\n14h-16h : lecture à la bibliothèque.\n16h-17h : film au cinéma.\n17h-18h : attente à l'aéroport.\n18h-19h : achats au centre commercial.\nHeure de fermeture du musée : 19h.\nLe seul moment où Emily a pu aller au musée est de 13h à 14h. Donc la réponse est (A)."
+   },
+   {
+    "input": "Aujourd'hui, Elizabeth est allée au parc d'attractions. Entre quelles heures a-t-elle pu y aller ?\nNous savons que :\nElizabeth s'est réveillée à 7h.\nDavid a vu Elizabeth réparer son ordinateur au magasin d'électronique de 13h à 14h.\nSarah a vu Elizabeth jouer au tennis au court de tennis de 14h à 15h.\nSusan a vu Elizabeth marcher vers la statue de la Liberté de 15h à 18h.\nAndrew a vu Elizabeth prendre des photos près de la tour Eiffel de 18h à 21h.\nEmily a vu Elizabeth prendre un café au café de 21h à 22h.\nLe parc d'attractions était fermé après 22h.\nEntre quelles heures Elizabeth a-t-elle pu aller au parc d'attractions ?\nOptions :\n(A) de 7h à 13h\n(B) de 21h à 22h\n(C) de 13h à 14h\n(D) de 15h à 18h",
+    "target": "Heure de réveil : 7h.\n7h-13h : libre.\n13h-14h : réparation de l'ordinateur au magasin d'électronique.\n14h-15h : tennis au court de tennis.\n15h-18h : marche vers la statue de la Liberté.\n18h-21h : photos près de la tour Eiffel.\n21h-22h : café au café.\nHeure de fermeture du parc d'attractions : 22h.\nLe seul moment où Elizabeth a pu aller au parc d'attractions est de 7h à 13h. Donc la réponse est (A)."
+   },
+   {
+    "input": "Aujourd'hui, Tiffany est allée à la plage. Entre quelles heures a-t-elle pu y aller ?\nNous savons que :\nTiffany s'est réveillée à 5h.\nBetty a vu Tiffany prendre un café au café de 5h à 6h.\nJessica a vu Tiffany travailler au bureau de 6h à 9h.\nJohn a vu Tiffany faire des étirements dans un studio de yoga de 9h à 12h.\nSean a vu Tiffany assise sur un toit-terrasse de 12h à 14h.\nSarah a vu Tiffany jouer au tennis au court de tennis de 14h à 15h.\nLa plage était fermée après 16h.\nEntre quelles heures Tiffany a-t-elle pu aller à la plage ?\nOptions :\n(A) de 9h à 12h\n(B) de 12h à 14h\n(C) de 5h à 6h\n(D) de 15h à 16h",
+    "target": "Heure de réveil : 5h.\n5h-6h : café au café.\n6h-9h : travail au bureau.\n9h-12h : étirements au studio de yoga.\n12h-14h : assise sur un toit-terrasse.\n14h-15h : tennis au court de tennis.\n15h-16h : libre.\nHeure de fermeture de la plage : 16h.\nLe seul moment où Tiffany a pu aller à la plage est de 15h à 16h. Donc la réponse est (D)."
+   }
+  ]
+ },
+ "penguins_in_a_table": {
+  "description": "Répondez à des questions sur un tableau de manchots et leurs attributs.\n\n",
+  "doc_to_text": "Q : {{input}}\nR : Réfléchissons étape par étape.\n",
+  "samples": [
+   {
+    "input": "Voici un tableau où la première ligne est un en-tête et chaque ligne suivante un manchot : nom, âge, taille (cm), poids (kg) Louis, 7, 50, 11 Bernard, 5, 80, 13 Vincent, 9, 60, 11 Gwen, 8, 70, 15  Par exemple : l'âge de Louis est 7, le poids de Gwen est 15 kg, la taille de Bernard est 80 cm.  Nous ajoutons maintenant un manchot au tableau :\nJames, 12, 90, 12\nCombien de manchots ont moins de 8 ans ?\nOptions :\n(A) 1\n(B) 2\n(C) 3\n(D) 4\n(E) 5",
+    "target": "Cette question porte sur l'âge. Nous savons : Louis a 7 ans, Bernard a 5 ans, Vincent a 9 ans et Gwen a 8 ans.\nNous ajoutons James : James a 12 ans.\nLes manchots de moins de 8 ans sont Louis et Bernard.\nIl y a 2 manchots de moins de 8 ans. Donc la réponse est (B)."
+   },
+   {
+    "input": "Voici un tableau où la première ligne est un en-tête et chaque ligne suivante un manchot : nom, âge, taille (cm), poids (kg) Louis, 7, 50, 11 Bernard, 5, 80, 13 Vincent, 9, 60, 11 Gwen, 8, 70, 15  Par exemple : l'âge de Louis est 7, le poids de Gwen est 15 kg, la taille de Bernard est 80 cm.  Quel est le manchot le plus jeune ?\nOptions :\n(A) Louis\n(B) Bernard\n(C) Vincent\n(D) Gwen\n(E) James",
+    "target": "Cette question porte sur l'âge. Nous savons : Louis a 7 ans, Bernard a 5 ans, Vincent a 9 ans et Gwen a 8 ans.\nD'après le tableau, Bernard (5) est le plus jeune d'entre eux.\nLe manchot le plus jeune est Bernard. Donc la réponse est (B)."
+   },
+   {
+    "input": "Voici un tableau où la première ligne est un en-tête et chaque ligne suivante un manchot : nom, âge, taille (cm), poids (kg) Louis, 7, 50, 11 Bernard, 5, 80, 13 Vincent, 9, 60, 11 Gwen, 8, 70, 15  Par exemple : l'âge de Louis est 7, le poids de Gwen est 15 kg, la taille de Bernard est 80 cm.  Quel est le nom du deuxième manchot dans l'ordre alphabétique ?\nOptions :\n(A) Louis\n(B) Bernard\n(C) Vincent\n(D) Gwen\n(E) James",
+    "target": "Cette question porte sur le nom. Les noms des manchots du tableau sont Louis, Bernard, Vincent et Gwen.\nEn les triant par ordre alphabétique, on obtient : Bernard, Gwen, Louis, Vincent.\nLe deuxième manchot dans l'ordre alphabétique est Gwen. Donc la réponse est (D)."
+   }
+  ]
+ },
+ "reasoning_about_colored_objects": {
+  "description": "Répondez à des questions très simples sur la couleur d'objets posés sur une surface.\n\n",
+  "doc_to_text": "Q : {{input}}\nR : Réfléchissons étape par étape.\n",
+  "samples": [
+   {
+    "input": "Sur la table de chevet, il y a un crayon rouge, une tasse violette, un porte-clés bordeaux, un ours en peluche fuchsia, une assiette noire et une balle anti-stress bleue. De quelle couleur est la balle anti-stress ?\nOptions :\n(A) rouge\n(B) orange\n(C) jaune\n(D) vert\n(E) bleu\n(F) marron\n(G) magenta\n(H) fuchsia\n(I) mauve\n(J) sarcelle\n(K) turquoise\n(L) bordeaux\n(M) argent\n(N) or\n(O) noir\n(P) gris\n(Q) violet\n(R) rose",
+    "target": "D'après la question, la couleur de la balle anti-stress est bleu. Donc la réponse est (E)."
+   },
+   {
+    "input": "Sur la table, vous voyez une série d'objets alignés en rangée : un trombone violet, une balle anti-stress rose, un porte-clés marron, un chargeur de téléphone vert, un hand spinner mauve et un stylo bordeaux. Quelle est la couleur de l'objet situé immédiatement à droite de la balle anti-stress ?\nOptions :\n(A) rouge\n(B) orange\n(C) jaune\n(D) vert\n(E) bleu\n(F) marron\n(G) magenta\n(H) fuchsia\n(I) mauve\n(J) sarcelle\n(K) turquoise\n(L) bordeaux\n(M) argent\n(N) or\n(O) noir\n(P) gris\n(Q) violet\n(R) rose",
+    "target": "D'après la question, les objets sont alignés de gauche à droite comme suit : (1) un trombone violet, (2) une balle anti-stress rose, (3) un porte-clés marron, (4) un chargeur de téléphone vert, (5) un hand spinner mauve, (6) un stylo bordeaux.\nLa balle anti-stress est le deuxième objet, soit (2). L'objet à sa droite est (3), un porte-clés marron.\nLa couleur du porte-clés est marron. Donc la réponse est (F)."
+   },
+   {
+    "input": "Sur la table de chevet, vous voyez les objets suivants alignés en rangée : une assiette sarcelle, un porte-clés bordeaux, un chargeur de téléphone jaune, une tasse orange, un carnet rose et un gobelet gris. Combien d'objets non oranges voyez-vous à gauche de l'objet sarcelle ?\nOptions :\n(A) zéro\n(B) un\n(C) deux\n(D) trois\n(E) quatre\n(F) cinq\n(G) six",
+    "target": "D'après la question, les objets sont alignés de gauche à droite comme suit : (1) une assiette sarcelle, (2) un porte-clés bordeaux, (3) un chargeur de téléphone jaune, (4) une tasse orange, (5) un carnet rose, (6) un gobelet gris.\nL'assiette sarcelle est le premier objet, soit (1). Il n'y a aucun objet à sa gauche.\nLe nombre d'objets non oranges à gauche de l'objet sarcelle est zéro. Donc la réponse est (A)."
+   }
+  ]
+ },
+ "dyck_languages": {
+  "description": "Complétez correctement un mot de Dyck-n.\n\n",
+  "doc_to_text": "Q : {{input}}\nR : Réfléchissons étape par étape.\n",
+  "samples": [
+   {
+    "input": "Complétez la suite, en veillant à ce que les parenthèses soient correctement fermées. Entrée : [ { [",
+    "target": "Traitons chaque symbole un par un en suivant l'état de la pile.\n0 : pile vide\n1 : [ ; pile : [\n2 : { ; pile : [ {\n3 : [ ; pile : [ { [\nNous avons atteint la fin. La pile finale est « [ { [ ».\nIl faut dépiler « [ », « { », « [ » un par un dans cet ordre.\nIl faut donc « ] », « } », « ] ». Donc la réponse est ] } ]."
+   },
+   {
+    "input": "Complétez la suite, en veillant à ce que les parenthèses soient correctement fermées. Entrée : < > ( ( [ [ ( { } ) [ < > ] ]",
+    "target": "Traitons chaque symbole un par un en suivant l'état de la pile.\n0 : pile vide\n1 : < ; pile : <\n2 : > ; pile : vide\n3 : ( ; pile : (\n4 : ( ; pile : ( (\n5 : [ ; pile : ( ( [\n6 : [ ; pile : ( ( [ [\n7 : ( ; pile : ( ( [ [ (\n8 : { ; pile : ( ( [ [ ( {\n9 : } ; pile : ( ( [ [ (\n10 : ) ; pile : ( ( [ [\n11 : [ ; pile : ( ( [ [ [\n12 : < ; pile : ( ( [ [ [ <\n13 : > ; pile : ( ( [ [ [\n14 : ] ; pile : ( ( [ [\n15 : ] ; pile : ( ( [\nNous avons atteint la fin. La pile finale est « ( ( [ ».\nIl faut dépiler « [ », « ( », « ( » un par un dans cet ordre.\nIl faut donc « ] », « ) », « ) ». Donc la réponse est ] ) )."
+   },
+   {
+    "input": "Complétez la suite, en veillant à ce que les parenthèses soient correctement fermées. Entrée : < [ < [ { < [ ] < { } > > } ] > { { ( ) } { < [ < > ] > }",
+    "target": "Traitons chaque symbole un par un en suivant l'état de la pile.\n0 : pile vide\n1 : < ; pile : <\n2 : [ ; pile : < [\n3 : < ; pile : < [ <\n4 : [ ; pile : < [ < [\n5 : { ; pile : < [ < [ {\n6 : < ; pile : < [ < [ { <\n7 : [ ; pile : < [ < [ { < [\n8 : ] ; pile : < [ < [ { <\n9 : < ; pile : < [ < [ { < <\n10 : { ; pile : < [ < [ { < < {\n11 : } ; pile : < [ < [ { < <\n12 : > ; pile : < [ < [ { <\n13 : > ; pile : < [ < [ {\n14 : } ; pile : < [ < [\n15 : ] ; pile : < [ <\n16 : > ; pile : < [\n17 : { ; pile : < [ {\n18 : { ; pile : < [ { {\n19 : ( ; pile : < [ { { (\n20 : ) ; pile : < [ { {\n21 : } ; pile : < [ {\n22 : { ; pile : < [ { {\n23 : < ; pile : < [ { { <\n24 : [ ; pile : < [ { { < [\n25 : < ; pile : < [ { { < [ <\n26 : > ; pile : < [ { { < [\n27 : ] ; pile : < [ { { <\n28 : > ; pile : < [ { {\n29 : } ; pile : < [ {\nNous avons atteint la fin. La pile finale est « < [ { ».\nIl faut dépiler « { », « [ », « < » un par un dans cet ordre.\nIl faut donc « } », « ] », « > ». Donc la réponse est } ] >."
+   }
+  ]
+ },
+ "formal_fallacies": {
+  "description": "Distinguez les arguments déductivement valides des sophismes formels.\n\n",
+  "doc_to_text": "Q : {{input}}\nR : Réfléchissons étape par étape.\n",
+  "samples": [
+   {
+    "input": "« Il n'est pas toujours facile de voir qui est lié à qui — et de quelle manière. L'argument suivant porte sur cette question : Pour commencer, Lesley est un ami proche de Fernando. De plus, être un ami proche de Fernando ou un camarade d'école de Lowell suffit pour être un arrière-grand-père de Leroy. Il s'ensuit que Lesley est un arrière-grand-père de Leroy. »\nCompte tenu des prémisses explicitement énoncées, l'argument est-il déductivement valide ou invalide ?\nOptions :\n- valide\n- invalide",
+    "target": "(1) Lesley est un ami proche de Fernando : Lesley = ami(Fernando).\n(2) Être un ami proche de Fernando ou un camarade d'école de Lowell suffit pour être un arrière-grand-père de Leroy : si X = ami(Fernando) OU camarade(Lowell), alors X = arrière-grand-père(Leroy).\nHypothèse : s'ensuit-il que Lesley = arrière-grand-père(Leroy) ?\nVoyons si l'hypothèse se déduit de (1) et (2) par raisonnement logique.\nPar (1), Lesley = ami(Fernando). Par (2), si Lesley = ami(Fernando), alors Lesley = arrière-grand-père(Leroy).\nIl est donc vrai que Lesley est un arrière-grand-père de Leroy. Donc la réponse est valide."
+   },
+   {
+    "input": "« Il n'est pas toujours facile de voir qui est lié à qui — et de quelle manière. L'argument suivant porte sur cette question : Quiconque n'est pas un arrière-grand-père de Clyde est un demi-frère de Brian. Être un ancêtre de Dana suffit pour ne pas être un arrière-grand-père de Clyde. Nous pouvons conclure : toute personne qui est un ancêtre de Dana est aussi un demi-frère de Brian. »\nCompte tenu des prémisses explicitement énoncées, l'argument est-il déductivement valide ou invalide ?\nOptions :\n- valide\n- invalide",
+    "target": "(1) Quiconque n'est pas un arrière-grand-père de Clyde est un demi-frère de Brian : si X = NON(arrière-grand-père(Clyde)), alors X = demi-frère(Brian).\n(2) Être un ancêtre de Dana suffit pour ne pas être un arrière-grand-père de Clyde : si X = ancêtre(Dana), alors X = NON(arrière-grand-père(Clyde)).\nHypothèse : s'ensuit-il que si X = ancêtre(Dana), alors X = demi-frère(Brian) ?\nVoyons si l'hypothèse se déduit de (1) et (2) par raisonnement logique.\nPar (2), si X = ancêtre(Dana), alors X = NON(arrière-grand-père(Clyde)).\nPar (1), si X = NON(arrière-grand-père(Clyde)), alors X = demi-frère(Brian).\nPar transitivité, on a donc : si X = ancêtre(Dana), alors X = demi-frère(Brian).\nIl est donc vrai que tout ancêtre de Dana est un demi-frère de Brian. Donc la réponse est valide."
+   },
+   {
+    "input": "« Il n'est pas toujours facile de saisir qui consomme quels produits. L'argument suivant porte sur cette question : Tout utilisateur occasionnel de shampooing Paul Mitchell est soit un consommateur rare de shampooing Nioxin, soit un acheteur fidèle de savon Caress, ou les deux. Aucun consommateur régulier de savon Lush n'est à la fois un consommateur rare de shampooing Nioxin et un acheteur fidèle de savon Caress. Il s'ensuit que quiconque est un utilisateur occasionnel de shampooing Paul Mitchell n'est pas un consommateur régulier de savon Lush. »\nCompte tenu des prémisses explicitement énoncées, l'argument est-il déductivement valide ou invalide ?\nOptions :\n- valide\n- invalide",
+    "target": "(1) Tout utilisateur occasionnel de Paul Mitchell est un consommateur rare de Nioxin ou un acheteur fidèle de Caress, ou les deux : si X = utilisateur-occasionnel(Paul Mitchell), alors X = consommateur-rare(Nioxin) OU X = acheteur-fidèle(Caress).\n(2) Aucun consommateur régulier de Lush n'est à la fois consommateur rare de Nioxin et acheteur fidèle de Caress : si X = consommateur-régulier(Lush), alors X = NON(consommateur-rare(Nioxin) ET acheteur-fidèle(Caress)).\nHypothèse : s'ensuit-il que si X = utilisateur-occasionnel(Paul Mitchell), alors X = NON(consommateur-régulier(Lush)) ?\nVoyons si l'hypothèse se déduit de (1) et (2) par raisonnement logique.\nPar (1), si X = utilisateur-occasionnel(Paul Mitchell), alors X = consommateur-rare(Nioxin) OU X = acheteur-fidèle(Caress). Examinons les deux cas séparément :\nLe cas X = consommateur-rare(Nioxin) n'apparaît pas dans (2).\nLe cas X = acheteur-fidèle(Caress) n'apparaît pas non plus dans (2).\nÀ partir de (1) et (2), on ne peut donc pas nécessairement déduire l'hypothèse. Donc la réponse est invalide."
+   }
+  ]
+ },
+ "logical_deduction_three_objects": {
+  "description": "Une tâche de déduction logique qui demande de déduire l'ordre d'une séquence d'objets.\n\n",
+  "doc_to_text": "Q : {{input}}\nR : Réfléchissons étape par étape.\n",
+  "samples": [
+   {
+    "input": "Chacun des paragraphes suivants décrit un ensemble de trois objets disposés dans un ordre fixe. Les énoncés sont logiquement cohérents dans chaque paragraphe. Lors d'un tournoi de golf, il y avait trois golfeurs : Amy, Eli et Eve. Eve a terminé au-dessus d'Amy. Eli a terminé en dessous d'Amy.\nOptions :\n(A) Amy a terminé dernière\n(B) Eli a terminé dernier\n(C) Eve a terminé dernière",
+    "target": "(1) Eve a terminé au-dessus d'Amy : « (haut) ? Eve ? Amy ? (bas) ».\n(2) Eli a terminé en dessous d'Amy : « (haut) ? Amy ? Eli ? (bas) ».\n(3) En combinant (1) et (2), on obtient l'ordre : « (haut) Eve Amy Eli (bas) ».\nSelon cet ordre, la personne arrivée dernière (en bas de la liste) est Eli.\nEli a terminé dernier. Donc la réponse est (B)."
+   },
+   {
+    "input": "Chacun des paragraphes suivants décrit un ensemble de trois objets disposés dans un ordre fixe. Les énoncés sont logiquement cohérents dans chaque paragraphe. Sur une étagère, il y a trois livres : un livre blanc, un livre vert et un livre orange. Le livre vert est à droite du livre blanc. Le livre orange est le plus à droite.\nOptions :\n(A) Le livre blanc est le plus à gauche\n(B) Le livre vert est le plus à gauche\n(C) Le livre orange est le plus à gauche",
+    "target": "(1) Le livre vert est à droite du livre blanc : « (gauche) ? blanc ? vert ? (droite) ».\n(2) Le livre orange est le plus à droite : « (gauche) ? blanc ? vert orange (droite) ».\n(3) En combinant (1) et (2), on obtient l'ordre : « (gauche) blanc vert orange (droite) ».\nSelon cet ordre, le livre le plus à gauche est le livre blanc.\nLe livre blanc est le plus à gauche. Donc la réponse est (A)."
+   },
+   {
+    "input": "Chacun des paragraphes suivants décrit un ensemble de trois objets disposés dans un ordre fixe. Les énoncés sont logiquement cohérents dans chaque paragraphe. Sur une étagère, il y a trois livres : un livre rouge, un livre gris et un livre blanc. Le livre blanc est à gauche du livre gris. Le livre rouge est le deuxième en partant de la gauche.\nOptions :\n(A) Le livre rouge est le plus à gauche\n(B) Le livre gris est le plus à gauche\n(C) Le livre blanc est le plus à gauche",
+    "target": "(1) Le livre blanc est à gauche du livre gris : « (gauche) ? blanc ? gris ? (droite) ».\n(2) Le livre rouge est le deuxième en partant de la gauche : « (gauche) ? blanc rouge gris ? (droite) ».\n(3) En combinant (1) et (2), on obtient l'ordre : « (gauche) blanc rouge gris (droite) ».\nSelon cet ordre, le livre le plus à gauche est le livre blanc.\nLe livre blanc est le plus à gauche. Donc la réponse est (C)."
+   }
+  ]
+ },
+ "logical_deduction_five_objects": {
+  "description": "Une tâche de déduction logique qui demande de déduire l'ordre d'une séquence d'objets.\n\n",
+  "doc_to_text": "Q : {{input}}\nR : Réfléchissons étape par étape.\n",
+  "samples": [
+   {
+    "input": "Chacun des paragraphes suivants décrit un ensemble de trois objets disposés dans un ordre fixe. Les énoncés sont logiquement cohérents dans chaque paragraphe. Lors d'un tournoi de golf, il y avait trois golfeurs : Amy, Eli et Eve. Eve a terminé au-dessus d'Amy. Eli a terminé en dessous d'Amy.\nOptions :\n(A) Amy a terminé dernière\n(B) Eli a terminé dernier\n(C) Eve a terminé dernière",
+    "target": "(1) Eve a terminé au-dessus d'Amy : « (haut) ? Eve ? Amy ? (bas) ».\n(2) Eli a terminé en dessous d'Amy : « (haut) ? Amy ? Eli ? (bas) ».\n(3) En combinant (1) et (2), on obtient l'ordre : « (haut) Eve Amy Eli (bas) ».\nSelon cet ordre, la personne arrivée dernière (en bas de la liste) est Eli.\nEli a terminé dernier. Donc la réponse est (B)."
+   },
+   {
+    "input": "Chacun des paragraphes suivants décrit un ensemble de trois objets disposés dans un ordre fixe. Les énoncés sont logiquement cohérents dans chaque paragraphe. Sur une étagère, il y a trois livres : un livre blanc, un livre vert et un livre orange. Le livre vert est à droite du livre blanc. Le livre orange est le plus à droite.\nOptions :\n(A) Le livre blanc est le plus à gauche\n(B) Le livre vert est le plus à gauche\n(C) Le livre orange est le plus à gauche",
+    "target": "(1) Le livre vert est à droite du livre blanc : « (gauche) ? blanc ? vert ? (droite) ».\n(2) Le livre orange est le plus à droite : « (gauche) ? blanc ? vert orange (droite) ».\n(3) En combinant (1) et (2), on obtient l'ordre : « (gauche) blanc vert orange (droite) ».\nSelon cet ordre, le livre le plus à gauche est le livre blanc.\nLe livre blanc est le plus à gauche. Donc la réponse est (A)."
+   },
+   {
+    "input": "Chacun des paragraphes suivants décrit un ensemble de trois objets disposés dans un ordre fixe. Les énoncés sont logiquement cohérents dans chaque paragraphe. Sur une étagère, il y a trois livres : un livre rouge, un livre gris et un livre blanc. Le livre blanc est à gauche du livre gris. Le livre rouge est le deuxième en partant de la gauche.\nOptions :\n(A) Le livre rouge est le plus à gauche\n(B) Le livre gris est le plus à gauche\n(C) Le livre blanc est le plus à gauche",
+    "target": "(1) Le livre blanc est à gauche du livre gris : « (gauche) ? blanc ? gris ? (droite) ».\n(2) Le livre rouge est le deuxième en partant de la gauche : « (gauche) ? blanc rouge gris ? (droite) ».\n(3) En combinant (1) et (2), on obtient l'ordre : « (gauche) blanc rouge gris (droite) ».\nSelon cet ordre, le livre le plus à gauche est le livre blanc.\nLe livre blanc est le plus à gauche. Donc la réponse est (C)."
+   }
+  ]
+ },
+ "logical_deduction_seven_objects": {
+  "description": "Une tâche de déduction logique qui demande de déduire l'ordre d'une séquence d'objets.\n\n",
+  "doc_to_text": "Q : {{input}}\nR : Réfléchissons étape par étape.\n",
+  "samples": [
+   {
+    "input": "Chacun des paragraphes suivants décrit un ensemble de trois objets disposés dans un ordre fixe. Les énoncés sont logiquement cohérents dans chaque paragraphe. Lors d'un tournoi de golf, il y avait trois golfeurs : Amy, Eli et Eve. Eve a terminé au-dessus d'Amy. Eli a terminé en dessous d'Amy.\nOptions :\n(A) Amy a terminé dernière\n(B) Eli a terminé dernier\n(C) Eve a terminé dernière",
+    "target": "(1) Eve a terminé au-dessus d'Amy : « (haut) ? Eve ? Amy ? (bas) ».\n(2) Eli a terminé en dessous d'Amy : « (haut) ? Amy ? Eli ? (bas) ».\n(3) En combinant (1) et (2), on obtient l'ordre : « (haut) Eve Amy Eli (bas) ».\nSelon cet ordre, la personne arrivée dernière (en bas de la liste) est Eli.\nEli a terminé dernier. Donc la réponse est (B)."
+   },
+   {
+    "input": "Chacun des paragraphes suivants décrit un ensemble de trois objets disposés dans un ordre fixe. Les énoncés sont logiquement cohérents dans chaque paragraphe. Sur une étagère, il y a trois livres : un livre blanc, un livre vert et un livre orange. Le livre vert est à droite du livre blanc. Le livre orange est le plus à droite.\nOptions :\n(A) Le livre blanc est le plus à gauche\n(B) Le livre vert est le plus à gauche\n(C) Le livre orange est le plus à gauche",
+    "target": "(1) Le livre vert est à droite du livre blanc : « (gauche) ? blanc ? vert ? (droite) ».\n(2) Le livre orange est le plus à droite : « (gauche) ? blanc ? vert orange (droite) ».\n(3) En combinant (1) et (2), on obtient l'ordre : « (gauche) blanc vert orange (droite) ».\nSelon cet ordre, le livre le plus à gauche est le livre blanc.\nLe livre blanc est le plus à gauche. Donc la réponse est (A)."
+   },
+   {
+    "input": "Chacun des paragraphes suivants décrit un ensemble de trois objets disposés dans un ordre fixe. Les énoncés sont logiquement cohérents dans chaque paragraphe. Sur une étagère, il y a trois livres : un livre rouge, un livre gris et un livre blanc. Le livre blanc est à gauche du livre gris. Le livre rouge est le deuxième en partant de la gauche.\nOptions :\n(A) Le livre rouge est le plus à gauche\n(B) Le livre gris est le plus à gauche\n(C) Le livre blanc est le plus à gauche",
+    "target": "(1) Le livre blanc est à gauche du livre gris : « (gauche) ? blanc ? gris ? (droite) ».\n(2) Le livre rouge est le deuxième en partant de la gauche : « (gauche) ? blanc rouge gris ? (droite) ».\n(3) En combinant (1) et (2), on obtient l'ordre : « (gauche) blanc rouge gris (droite) ».\nSelon cet ordre, le livre le plus à gauche est le livre blanc.\nLe livre blanc est le plus à gauche. Donc la réponse est (C)."
+   }
+  ]
+ },
+ "tracking_shuffled_objects_three_objects": {
+  "description": "Une tâche qui demande de déterminer les positions finales d'un ensemble d'objets à partir de leurs positions initiales et d'une séquence d'échanges.\n\n",
+  "doc_to_text": "Q : {{input}}\nR : Réfléchissons étape par étape.\n",
+  "samples": [
+   {
+    "input": "Alice, Bob et Claire jouent à un jeu. Au début du jeu, chacun tient une balle : Alice a une balle jaune, Bob a une balle bleue et Claire a une balle rose.\nAu cours du jeu, des paires de joueurs échangent leurs balles. D'abord, Claire et Alice échangent leurs balles. Ensuite, Alice et Bob échangent leurs balles. Enfin, Claire et Bob échangent leurs balles. À la fin du jeu, Bob a la\nOptions :\n(A) balle jaune\n(B) balle bleue\n(C) balle rose",
+    "target": "(0) Au début : Alice : jaune, Bob : bleu, Claire : rose.\n(1) Claire et Alice échangent : Alice : rose, Bob : bleu, Claire : jaune.\n(2) Alice et Bob échangent : Alice : bleu, Bob : rose, Claire : jaune.\n(3) Claire et Bob échangent : Alice : bleu, Bob : jaune, Claire : rose.\nÀ la fin du jeu, Bob a la balle jaune. Donc la réponse est (A)."
+   },
+   {
+    "input": "Alice, Bob et Claire jouent à un jeu. Au début du jeu, chacun tient une balle : Alice a une balle blanche, Bob a une balle violette et Claire a une balle rose.\nAu cours du jeu, des paires de joueurs échangent leurs balles. D'abord, Bob et Alice échangent leurs balles. Ensuite, Bob et Claire échangent leurs balles. Enfin, Bob et Alice échangent leurs balles. À la fin du jeu, Alice a la\nOptions :\n(A) balle blanche\n(B) balle violette\n(C) balle rose",
+    "target": "(0) Au début : Alice : blanc, Bob : violet, Claire : rose.\n(1) Bob et Alice échangent : Alice : violet, Bob : blanc, Claire : rose.\n(2) Bob et Claire échangent : Alice : violet, Bob : rose, Claire : blanc.\n(3) Bob et Alice échangent : Alice : rose, Bob : violet, Claire : blanc.\nÀ la fin du jeu, Alice a la balle rose. Donc la réponse est (C)."
+   },
+   {
+    "input": "Alice, Bob et Claire sont danseurs lors d'un bal folk. Au début d'un morceau, chacun a un partenaire : Alice danse avec Lola, Bob danse avec Rodrigo et Claire danse avec Patrick.\nTout au long du morceau, les danseurs changent souvent de partenaire. D'abord, Alice et Bob changent de partenaire. Ensuite, Claire et Bob changent de partenaire. Enfin, Bob et Alice changent de partenaire. À la fin de la danse, Alice danse avec\nOptions :\n(A) Lola\n(B) Rodrigo\n(C) Patrick",
+    "target": "(0) Au début : Alice : Lola, Bob : Rodrigo, Claire : Patrick.\n(1) Alice et Bob changent de partenaire : Alice : Rodrigo, Bob : Lola, Claire : Patrick.\n(2) Claire et Bob changent de partenaire : Alice : Rodrigo, Bob : Patrick, Claire : Lola.\n(3) Bob et Alice changent de partenaire : Alice : Patrick, Bob : Rodrigo, Claire : Lola.\nÀ la fin de la danse, Alice danse avec Patrick. Donc la réponse est (C)."
+   }
+  ]
+ },
+ "tracking_shuffled_objects_five_objects": {
+  "description": "Une tâche qui demande de déterminer les positions finales d'un ensemble d'objets à partir de leurs positions initiales et d'une séquence d'échanges.\n\n",
+  "doc_to_text": "Q : {{input}}\nR : Réfléchissons étape par étape.\n",
+  "samples": [
+   {
+    "input": "Alice, Bob et Claire jouent à un jeu. Au début du jeu, chacun tient une balle : Alice a une balle jaune, Bob a une balle bleue et Claire a une balle rose.\nAu cours du jeu, des paires de joueurs échangent leurs balles. D'abord, Claire et Alice échangent leurs balles. Ensuite, Alice et Bob échangent leurs balles. Enfin, Claire et Bob échangent leurs balles. À la fin du jeu, Bob a la\nOptions :\n(A) balle jaune\n(B) balle bleue\n(C) balle rose",
+    "target": "(0) Au début : Alice : jaune, Bob : bleu, Claire : rose.\n(1) Claire et Alice échangent : Alice : rose, Bob : bleu, Claire : jaune.\n(2) Alice et Bob échangent : Alice : bleu, Bob : rose, Claire : jaune.\n(3) Claire et Bob échangent : Alice : bleu, Bob : jaune, Claire : rose.\nÀ la fin du jeu, Bob a la balle jaune. Donc la réponse est (A)."
+   },
+   {
+    "input": "Alice, Bob et Claire jouent à un jeu. Au début du jeu, chacun tient une balle : Alice a une balle blanche, Bob a une balle violette et Claire a une balle rose.\nAu cours du jeu, des paires de joueurs échangent leurs balles. D'abord, Bob et Alice échangent leurs balles. Ensuite, Bob et Claire échangent leurs balles. Enfin, Bob et Alice échangent leurs balles. À la fin du jeu, Alice a la\nOptions :\n(A) balle blanche\n(B) balle violette\n(C) balle rose",
+    "target": "(0) Au début : Alice : blanc, Bob : violet, Claire : rose.\n(1) Bob et Alice échangent : Alice : violet, Bob : blanc, Claire : rose.\n(2) Bob et Claire échangent : Alice : violet, Bob : rose, Claire : blanc.\n(3) Bob et Alice échangent : Alice : rose, Bob : violet, Claire : blanc.\nÀ la fin du jeu, Alice a la balle rose. Donc la réponse est (C)."
+   },
+   {
+    "input": "Alice, Bob et Claire sont danseurs lors d'un bal folk. Au début d'un morceau, chacun a un partenaire : Alice danse avec Lola, Bob danse avec Rodrigo et Claire danse avec Patrick.\nTout au long du morceau, les danseurs changent souvent de partenaire. D'abord, Alice et Bob changent de partenaire. Ensuite, Claire et Bob changent de partenaire. Enfin, Bob et Alice changent de partenaire. À la fin de la danse, Alice danse avec\nOptions :\n(A) Lola\n(B) Rodrigo\n(C) Patrick",
+    "target": "(0) Au début : Alice : Lola, Bob : Rodrigo, Claire : Patrick.\n(1) Alice et Bob changent de partenaire : Alice : Rodrigo, Bob : Lola, Claire : Patrick.\n(2) Claire et Bob changent de partenaire : Alice : Rodrigo, Bob : Patrick, Claire : Lola.\n(3) Bob et Alice changent de partenaire : Alice : Patrick, Bob : Rodrigo, Claire : Lola.\nÀ la fin de la danse, Alice danse avec Patrick. Donc la réponse est (C)."
+   }
+  ]
+ },
+ "tracking_shuffled_objects_seven_objects": {
+  "description": "Une tâche qui demande de déterminer les positions finales d'un ensemble d'objets à partir de leurs positions initiales et d'une séquence d'échanges.\n\n",
+  "doc_to_text": "Q : {{input}}\nR : Réfléchissons étape par étape.\n",
+  "samples": [
+   {
+    "input": "Alice, Bob et Claire jouent à un jeu. Au début du jeu, chacun tient une balle : Alice a une balle jaune, Bob a une balle bleue et Claire a une balle rose.\nAu cours du jeu, des paires de joueurs échangent leurs balles. D'abord, Claire et Alice échangent leurs balles. Ensuite, Alice et Bob échangent leurs balles. Enfin, Claire et Bob échangent leurs balles. À la fin du jeu, Bob a la\nOptions :\n(A) balle jaune\n(B) balle bleue\n(C) balle rose",
+    "target": "(0) Au début : Alice : jaune, Bob : bleu, Claire : rose.\n(1) Claire et Alice échangent : Alice : rose, Bob : bleu, Claire : jaune.\n(2) Alice et Bob échangent : Alice : bleu, Bob : rose, Claire : jaune.\n(3) Claire et Bob échangent : Alice : bleu, Bob : jaune, Claire : rose.\nÀ la fin du jeu, Bob a la balle jaune. Donc la réponse est (A)."
+   },
+   {
+    "input": "Alice, Bob et Claire jouent à un jeu. Au début du jeu, chacun tient une balle : Alice a une balle blanche, Bob a une balle violette et Claire a une balle rose.\nAu cours du jeu, des paires de joueurs échangent leurs balles. D'abord, Bob et Alice échangent leurs balles. Ensuite, Bob et Claire échangent leurs balles. Enfin, Bob et Alice échangent leurs balles. À la fin du jeu, Alice a la\nOptions :\n(A) balle blanche\n(B) balle violette\n(C) balle rose",
+    "target": "(0) Au début : Alice : blanc, Bob : violet, Claire : rose.\n(1) Bob et Alice échangent : Alice : violet, Bob : blanc, Claire : rose.\n(2) Bob et Claire échangent : Alice : violet, Bob : rose, Claire : blanc.\n(3) Bob et Alice échangent : Alice : rose, Bob : violet, Claire : blanc.\nÀ la fin du jeu, Alice a la balle rose. Donc la réponse est (C)."
+   },
+   {
+    "input": "Alice, Bob et Claire sont danseurs lors d'un bal folk. Au début d'un morceau, chacun a un partenaire : Alice danse avec Lola, Bob danse avec Rodrigo et Claire danse avec Patrick.\nTout au long du morceau, les danseurs changent souvent de partenaire. D'abord, Alice et Bob changent de partenaire. Ensuite, Claire et Bob changent de partenaire. Enfin, Bob et Alice changent de partenaire. À la fin de la danse, Alice danse avec\nOptions :\n(A) Lola\n(B) Rodrigo\n(C) Patrick",
+    "target": "(0) Au début : Alice : Lola, Bob : Rodrigo, Claire : Patrick.\n(1) Alice et Bob changent de partenaire : Alice : Rodrigo, Bob : Lola, Claire : Patrick.\n(2) Claire et Bob changent de partenaire : Alice : Rodrigo, Bob : Patrick, Claire : Lola.\n(3) Bob et Alice changent de partenaire : Alice : Patrick, Bob : Rodrigo, Claire : Lola.\nÀ la fin de la danse, Alice danse avec Patrick. Donc la réponse est (C)."
+   }
+  ]
+ },
+ "word_sorting": {
+  "description": "Triez une liste de mots par ordre alphabétique.\n\n",
+  "doc_to_text": "Q : {{input}}\nR : Réfléchissons étape par étape.\n",
+  "samples": [
+   {
+    "input": "Triez les mots suivants par ordre alphabétique. Liste : melon banane pomme abricot",
+    "target": "Regardons la première lettre de chaque mot : « melon » (m), « banane » (b), « pomme » (p), « abricot » (a).\nDans l'alphabet : a < b < m < p.\nEn triant selon ces premières lettres : abricot (a) < banane (b) < melon (m) < pomme (p).\nDonc la réponse est abricot banane melon pomme."
+   },
+   {
+    "input": "Triez les mots suivants par ordre alphabétique. Liste : tasse tapis table",
+    "target": "Ces trois mots commencent par « ta », il faut donc comparer la troisième lettre : « table » (b), « tapis » (p), « tasse » (s).\nDans l'alphabet : b < p < s.\nEn triant : table (tab) < tapis (tap) < tasse (tas).\nDonc la réponse est table tapis tasse."
+   },
+   {
+    "input": "Triez les mots suivants par ordre alphabétique. Liste : chien cerf chat",
+    "target": "Ces trois mots commencent par « c ». On compare la deuxième lettre : « chien » (h), « cerf » (e), « chat » (h).\nComme e < h, « cerf » vient en premier. Il reste « chien » et « chat », qui partagent « ch » ; on compare la troisième lettre : « chat » (a) < « chien » (i).\nEn triant : cerf < chat < chien.\nDonc la réponse est cerf chat chien."
+   }
+  ]
+ },
+ "hyperbaton": {
+  "description": "Parmi deux phrases, choisissez celle dont l'ordre des adjectifs est correct en français.\n\n",
+  "doc_to_text": "Q : {{input}}\nR : Réfléchissons étape par étape.\n",
+  "samples": [
+   {
+    "input": "Quelle phrase présente un ordre des adjectifs correct ?\nOptions :\n(A) une grande maison blanche\n(B) une blanche maison grande",
+    "target": "En français, l'adjectif court et courant « grande » se place avant le nom, tandis que l'adjectif de couleur « blanche » se place après le nom. L'ordre correct est donc « une grande maison blanche ». Dans l'option (B), les deux adjectifs sont mal placés. Donc la réponse est (A)."
+   },
+   {
+    "input": "Quelle phrase présente un ordre des adjectifs correct ?\nOptions :\n(A) un pont romain vieux\n(B) un vieux pont romain",
+    "target": "En français, l'adjectif court et courant « vieux » se place avant le nom, tandis que l'adjectif de relation/origine « romain » se place après le nom. L'ordre correct est donc « un vieux pont romain ». L'option (A) place « vieux » après le nom, ce qui est incorrect. Donc la réponse est (B)."
+   },
+   {
+    "input": "Quelle phrase présente un ordre des adjectifs correct ?\nOptions :\n(A) un petit chat noir\n(B) un noir chat petit",
+    "target": "En français, l'adjectif court et courant « petit » se place avant le nom, tandis que l'adjectif de couleur « noir » se place après le nom. L'ordre correct est donc « un petit chat noir ». Dans l'option (B), les deux adjectifs sont mal placés. Donc la réponse est (A)."
+   }
+  ]
+ },
+ "snarks": {
+  "description": "Parmi deux affirmations presque identiques, déterminez laquelle est sarcastique.\n\n",
+  "doc_to_text": "Q : {{input}}\nR : Réfléchissons étape par étape.\n",
+  "samples": [
+   {
+    "input": "Quelle affirmation est sarcastique ?\nOptions :\n(A) Génial, encore une réunion de trois heures, exactement ce dont j'avais besoin aujourd'hui.\n(B) Cette réunion de trois heures a été vraiment productive et utile.",
+    "target": "Une réunion de trois heures est généralement vécue comme pénible. L'option (A) qualifie une telle réunion de « exactement ce dont j'avais besoin » : le ton enthousiaste contredit la réalité pénible, c'est donc du sarcasme. L'option (B) est un compliment sincère et cohérent. Donc la réponse est (A)."
+   },
+   {
+    "input": "Quelle affirmation est sarcastique ?\nOptions :\n(A) Merci de m'avoir prévenu à l'avance, cela m'a beaucoup aidé.\n(B) Oh super, tu me préviens une fois que tout est déjà terminé, quelle aide précieuse.",
+    "target": "Être prévenu une fois que tout est terminé n'aide en rien. L'option (B) parle pourtant d'« aide précieuse » sur un ton faussement enthousiaste, en contradiction avec la situation : c'est du sarcasme. L'option (A) est un remerciement sincère et cohérent. Donc la réponse est (B)."
+   },
+   {
+    "input": "Quelle affirmation est sarcastique ?\nOptions :\n(A) Bravo, tu as encore oublié les clés, on ne peut vraiment pas te faire confiance pour ça.\n(B) Tu penses toujours à prendre les clés, on peut compter sur toi.",
+    "target": "Oublier les clés est un échec. L'option (A) félicite (« Bravo ») quelqu'un pour cet oubli, sur un ton dont l'enthousiasme contredit la situation : c'est du sarcasme. L'option (B) est un compliment sincère et cohérent. Donc la réponse est (A)."
+   }
+  ]
+ },
+ "disambiguation_qa": {
+  "description": "Clarifiez l'antécédent du pronom dans la phrase, ou indiquez que la phrase est ambiguë.\n\n",
+  "doc_to_text": "Q : {{input}}\nR : Réfléchissons étape par étape.\n",
+  "samples": [
+   {
+    "input": "Dans la phrase suivante, à qui ou à quoi renvoie le pronom souligné ?\nPhrase : Le mécanicien a rendu la voiture à la cliente après qu'il l'a réparée.\nOptions :\n(A) C'est le mécanicien qui l'a réparée\n(B) C'est la cliente qui l'a réparée\n(C) Ambigu",
+    "target": "Le pronom « il » est au masculin singulier. Dans la phrase, « le mécanicien » est masculin et « la cliente » est féminine. « il » ne peut donc renvoyer qu'au mécanicien. Donc la réponse est (A)."
+   },
+   {
+    "input": "Dans la phrase suivante, à qui ou à quoi renvoie le pronom souligné ?\nPhrase : Sophie a dit à Marie qu'elle avait réussi l'examen.\nOptions :\n(A) C'est Sophie qui a réussi\n(B) C'est Marie qui a réussi\n(C) Ambigu",
+    "target": "Le pronom « elle » est au féminin singulier. « Sophie » et « Marie » sont toutes deux féminines, et rien dans la phrase ne permet de trancher. L'antécédent est donc indéterminé. Donc la réponse est (C)."
+   },
+   {
+    "input": "Dans la phrase suivante, à qui ou à quoi renvoie le pronom souligné ?\nPhrase : L'infirmière a prévenu le patient qu'il devait rester à jeun.\nOptions :\n(A) C'est l'infirmière qui devait rester à jeun\n(B) C'est le patient qui devait rester à jeun\n(C) Ambigu",
+    "target": "Le pronom « il » est au masculin singulier. « L'infirmière » est féminin et « le patient » est masculin. « il » ne peut donc renvoyer qu'au patient. Donc la réponse est (B)."
+   }
+  ]
+ },
+ "salient_translation_error_detection": {
+  "description": "Détectez le type d'erreur saillante dans une traduction de l'allemand vers le français.\n\n",
+  "doc_to_text": "Q : {{input}}\nR : Réfléchissons étape par étape.\n",
+  "samples": [
+   {
+    "input": "Voici une traduction de l'allemand vers le français ; elle contient une erreur. Indiquez le type d'erreur.\nSource : Berlin ist die Hauptstadt von Deutschland.\nTraduction : Paris est la capitale de l'Allemagne.\nOptions :\n(A) Modificateurs ou adjectifs\n(B) Valeurs numériques\n(C) Négation ou antonymes\n(D) Entités nommées\n(E) Contenu omis\n(F) Faits",
+    "target": "La source dit que « Berlin » est la capitale de l'Allemagne, mais la traduction indique « Paris ». Un nom propre a été remplacé par un autre : il s'agit d'une erreur sur une entité nommée. Donc la réponse est (D)."
+   },
+   {
+    "input": "Voici une traduction de l'allemand vers le français ; elle contient une erreur. Indiquez le type d'erreur.\nSource : Das Haus hat zwölf Zimmer.\nTraduction : La maison a vingt pièces.\nOptions :\n(A) Modificateurs ou adjectifs\n(B) Valeurs numériques\n(C) Négation ou antonymes\n(D) Entités nommées\n(E) Contenu omis\n(F) Faits",
+    "target": "La source dit « zwölf » (douze) pièces, mais la traduction indique « vingt ». Le nombre a été modifié : il s'agit d'une erreur sur une valeur numérique. Donc la réponse est (B)."
+   },
+   {
+    "input": "Voici une traduction de l'allemand vers le français ; elle contient une erreur. Indiquez le type d'erreur.\nSource : Der Hund ist nicht groß.\nTraduction : Le chien est grand.\nOptions :\n(A) Modificateurs ou adjectifs\n(B) Valeurs numériques\n(C) Négation ou antonymes\n(D) Entités nommées\n(E) Contenu omis\n(F) Faits",
+    "target": "La source dit que le chien n'est « nicht groß » (pas grand), mais la traduction affirme qu'il est « grand ». La négation a été supprimée, ce qui inverse le sens : il s'agit d'une erreur de négation ou d'antonyme. Donc la réponse est (C)."
+   }
+  ]
+ }
+}
