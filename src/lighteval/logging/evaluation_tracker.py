@@ -251,29 +251,37 @@ class EvaluationTracker:
 
         results_dict = self.results
 
-        # Create the details datasets for later upload. Building one hashes/pickles the whole Arrow
-        # table, and for tasks with very large fields (e.g. live_code_bench: long code + test cases)
-        # a single column can exceed Arrow's 2 GB offset limit -> "ArrowInvalid: offset overflow",
-        # which used to crash the whole run *before* the results were even written. Only build the
-        # details when something will actually consume them (saved to disk, pushed to the hub, or
-        # logged to W&B); otherwise skip straight to saving the results.
+        # Save the results FIRST, before building the details datasets. Building one hashes/pickles
+        # the whole Arrow table, and for tasks with very large fields (e.g. live_code_bench: long code
+        # + test cases) a single column can exceed Arrow's 2 GB offset limit -> "ArrowInvalid: offset
+        # overflow". Writing the results up front guarantees the results JSON survives even if the
+        # details then fail to build or write.
+        self.save_results(date_id, results_dict)
+
+        # Only build the details when something will actually consume them (saved to disk, pushed to
+        # the hub, or logged to W&B). A task whose details can't be built (e.g. the Arrow overflow
+        # above) is recorded and skipped — so the other tasks' details are still saved — and the
+        # failure is re-raised at the end of this method so the job still exits non-zero. The results
+        # are already safe on disk at this point.
         details_datasets: dict[str, Dataset] = {}
+        details_errors: list[str] = []
         if self.should_save_details or self.should_push_to_hub or self.use_wandb:
             for task_name, task_details in self.details_logger.details.items():
-                # Create a dataset from the dictionary - we force cast to str to avoid formatting problems for nested objects
-                dataset = Dataset.from_list([asdict(detail) for detail in task_details])
+                try:
+                    # Create a dataset from the dictionary - we force cast to str to avoid formatting problems for nested objects
+                    dataset = Dataset.from_list([asdict(detail) for detail in task_details])
 
-                # We don't keep 'id' around if it's there
-                column_names = dataset.column_names
-                if "id" in dataset.column_names:
-                    column_names = [t for t in dataset.column_names if t != "id"]
+                    # We don't keep 'id' around if it's there
+                    column_names = dataset.column_names
+                    if "id" in dataset.column_names:
+                        column_names = [t for t in dataset.column_names if t != "id"]
 
-                # Sort column names to make it easier later
-                dataset = dataset.select_columns(sorted(column_names))
-                details_datasets[task_name] = dataset
-
-        # We save results at every case
-        self.save_results(date_id, results_dict)
+                    # Sort column names to make it easier later
+                    dataset = dataset.select_columns(sorted(column_names))
+                    details_datasets[task_name] = dataset
+                except Exception as e:
+                    logger.error(f"Could not build the details dataset for task '{task_name}': {type(e).__name__}: {e}")
+                    details_errors.append(f"{task_name}: {type(e).__name__}: {e}")
 
         if self.should_save_details:
             self.save_details(date_id, details_datasets)
@@ -294,6 +302,14 @@ class EvaluationTracker:
         if self.should_push_results_to_tensorboard:
             self.push_to_tensorboard(
                 results=self.metrics_logger.metric_aggregated, details=self.details_logger.compiled_details
+            )
+
+        # Results (and any details that could be built) are now saved; surface a details failure so
+        # the job still exits non-zero for the batch scheduler to flag, without having lost the results.
+        if details_errors:
+            raise RuntimeError(
+                f"Results were saved, but building the evaluation details failed for {len(details_errors)} "
+                "task(s): " + "; ".join(details_errors)
             )
 
     def push_to_wandb(self, results_dict: dict, details_datasets: dict) -> None:
