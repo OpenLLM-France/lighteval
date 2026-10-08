@@ -36,6 +36,8 @@ sample-by-sample results* to debug and see how your models stack-up.
 
 *Customization at your fingertips*: letting you either browse all our existing tasks and [metrics](https://huggingface.co/docs/lighteval/metric-list) or effortlessly create your own [custom task](https://huggingface.co/docs/lighteval/adding-a-custom-task) and [custom metric](https://huggingface.co/docs/lighteval/adding-a-new-metric), tailored to your needs.
 
+> **🇫🇷 OpenLLM-France fork.** This is the OpenLLM-France fork of lighteval, maintained by the OpenLLM-France consortium, on top of upstream [huggingface/lighteval](https://github.com/huggingface/lighteval). It adds a suite of French and multilingual benchmarks, safety and red-teaming evaluations, translation metrics (COMET, MetricX), long-context (RULER) and reasoning-model (thinking-budget) support, an offline-capable LLM-as-judge, and many bug fixes and backend-robustness improvements. See [OpenLLM-France fork additions](#openllm-france-fork-additions) for the full list.
+
 
 ## Available Tasks
 
@@ -161,6 +163,73 @@ results = pipeline.evaluate()
 pipeline.show_results()
 results = pipeline.get_results()
 ```
+
+## OpenLLM-France fork additions
+
+This fork is maintained by the [OpenLLM-France](https://github.com/OpenLLM-France) consortium on top of upstream [huggingface/lighteval](https://github.com/huggingface/lighteval). Below is a summary of what it adds, grouped by category.
+
+### Added benchmarks and tasks
+
+**French & multilingual**
+- **BBH** (BIG-Bench-Hard) and **BBH-fr** (French), with chain-of-thought
+- **EIFFEL** — French idiomatic-expression MCQ
+- **CARTE** — French regional/cultural knowledge (with abstention-aware metrics)
+- **INCLUDE** — multilingual regional-knowledge exams
+- **Multilingual PIQA** — physical commonsense
+- **Multilingual AIME 2025** (French, German, …)
+- **BLEnD** — multilingual everyday cultural commonsense
+- **MGSM-rev2** — corrected MGSM, with proper chain-of-thought few-shot
+- **MathAlea** — French math MCQ (+ a generative variant)
+- **Exo7** — French math multi-label evaluation
+- **MMLU-Pro** generative variant (for instruct/thinking models), with CoT few-shot
+- **GPQA-fr** turned into a generative benchmark
+- **luciole_rag** — citation-aware grounded QA / RAG benchmark
+- **FLORES-200 instruction variant** (`flores200_instruct`) — chat/instruction-style translation with answer extraction
+- Additional settings for Arabic benchmarks
+
+**Safety & red-teaming**
+- Safety benchmarks in French and other languages
+- **WildJailBreak**, **AyaRedTeaming**, **HarmBench**, **Hex-PHI**, and an AdvBench-based red-teaming benchmark
+- **FalseQA**, **PCBench**, **SCoolKID** (false-premise detection)
+- LLM-as-judge refusal metrics
+
+**Long context**
+- **RULER** (metric + prompts)
+
+### Reasoning ("thinking") model support
+- Two-phase generation with a separate **thinking budget** (default 5k) so the reasoning trace does not eat into the answer budget
+- `enable_thinking` option
+- Automatic detection of thinking models and their reasoning tags — `<think>…</think>` and Mistral `[THINK]…[/THINK]`
+- Robust stripping of reasoning traces (including models that prime the opening tag in the generation prompt)
+
+### LLM-as-judge improvements
+- **Run the judge fully offline as a local (vLLM) model** — any Hugging Face model can be the judge, removing the hard dependency on an OpenAI/API judge. This is what makes it possible to use local safety judges such as Llama Guard 4, wildguard or Qwen in the safety benchmarks.
+- vLLM-judge enabling fixes: render chat messages to strings instead of token ids; free the evaluated model's GPU memory before loading the judge; environment variables to tune the judge's memory usage and to force eager mode.
+- More robust and reproducible judging: deterministic results; don't drop samples when the judge response can't be parsed; keep non-numeric (textual) judge outputs in the details; optional variant where the judge does not see the question.
+- LLM-as-judge **refusal metrics** (for safety / red-teaming).
+
+### Translation metrics
+- **COMET** and **MetricX** metrics, wired into the FLORES benchmarks (device/batch options, GPU execution, offline-safe)
+- FLORES made to work with the parquet version of the dataset
+
+### Backend, performance & robustness
+- Auto-detect the **Mistral/tekken tokenizer** (no more `LIGHTEVAL_TOKENIZER_MODE`)
+- Context-parallelism support (vLLM ≥ 0.15); fixes for mixing data/pipeline parallelism
+- Compatibility with recent vLLM versions (engine-arg filtering with warnings, logprob/prefix-caching fixes)
+- Memory controls (free the model before the judge, litellm logprob RAM fix, KV-cache length limits)
+- Caching fixes: `LIGHTEVAL_DISABLE_CACHE`, address-independent cache keys, unique `doc.id` across splits
+- Honour `HF_HOME`; offline-safe dataset/tokenizer loading; env vars for eager mode and VLM/Mistral loading
+- Option to set up a run **without actually running the evaluation** (dry run, e.g. to validate task/model loading)
+- **Robust result saving**: write the results JSON *before* building the details, so results survive even when details serialization fails (e.g. the Arrow 2 GB overflow on `live_code_bench`); such a failure is still surfaced as a non-zero exit
+
+### Bug fixes
+- **Multiple-choice (MCQ) scoring on the Accelerate/Transformers backend**: fixed an incorrect 2-D slicing of the gathered continuation logits (and stray `-1` padding left in the continuations) that corrupted the log-likelihood comparison across choices.
+- Log-probability computation with recent vLLM (≥ 0.12), broken by prefix caching.
+- Many other corner-case fixes: IFBench / IFEval-fr, MGSM / MMLU-Pro few-shot CoT, GPQA-fr dataset, stop-sequences, `squad_v2` unanswerable rows, nltk / transformers version robustness, offline judge, and more
+
+### Packaging
+- Community-task JSON stored as regular files (not Git LFS)
+- Fork-specific install / doc-build adjustments; built-in French/English system prompts; per-doc system-role support via `Doc.specific`
 
 ## 🙏 Acknowledgements
 
