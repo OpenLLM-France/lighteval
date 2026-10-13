@@ -190,7 +190,8 @@ This fork is maintained by the [OpenLLM-France](https://github.com/OpenLLM-Franc
 **Safety & red-teaming**
 - Safety benchmarks in French and other languages
 - **WildJailBreak**, **AyaRedTeaming**, **HarmBench**, **Hex-PHI**, and an AdvBench-based red-teaming benchmark
-- **FalseQA**, **PCBench**, **SCoolKID** (false-premise detection)
+- **FalseQA**, **PCBench** (false-premise detection)
+- **RedTeachingBench** — curriculum-grounded false-premise red-teaming for teachers (French Cycle 4)
 - LLM-as-judge refusal metrics
 
 **Long context**
