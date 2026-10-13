@@ -47,13 +47,83 @@ from lighteval.models.model_output import ModelResponse
 logger = logging.getLogger(__name__)
 
 
-# Reasoning tags used to detect thinking models and to split reasoning from the answer.
+# Default reasoning tags, used to split reasoning from the answer when the model does not declare
+# its own as special tokens. DeepSeek-R1, Qwen3, ... emit these as plain strings in the template.
 THINK_START_TAG = "<think>"
 THINK_END_TAG = "</think>"
+
+# Reasoning tag pairs that some model families ship as dedicated vocabulary tokens — whether or not
+# they are flagged "special". Their presence in the vocab is a reliable "this is a reasoning model"
+# signal, because such tokens only ship with reasoning checkpoints. Currently: Mistral/Magistral/
+# Ministral reasoning models (``[THINK]``/``[/THINK]``, tekken control tokens from 2507+ releases).
+# NB: these should NOT be flagged *special*, or ``skip_special_tokens`` (on by default in every
+# backend) strips them from the decoded text and breaks the two-phase stop/split — see
+# `reasoning_tags_are_special`.
+DECLARED_REASONING_TAG_PAIRS: list[tuple[str, str]] = [("[THINK]", "[/THINK]")]
 
 # Default reasoning budget (in tokens) for thinking models, used when the model args do not
 # set generation_parameters.thinking_budget. Generous by design: reasoning traces are long.
 DEFAULT_THINKING_BUDGET = 5000
+
+
+def _tokenizer_has_tokens(tokenizer, *tokens: str) -> bool:
+    """Whether the tokenizer knows every given string as a dedicated token (special OR not)."""
+    present: set[str] = set()
+    try:
+        present |= set(tokenizer.get_vocab() or {})  # includes added tokens, special or not
+    except Exception:
+        pass
+    present |= set(getattr(tokenizer, "added_tokens_encoder", {}) or {})
+    present |= set(getattr(tokenizer, "all_special_tokens", []) or [])
+    return all(tok in present for tok in tokens)
+
+
+def declared_reasoning_tags(tokenizer) -> Optional[tuple[str, str]]:
+    """The reasoning tag pair this model ships as dedicated tokens (e.g. Mistral ``[THINK]``), if any.
+
+    Matches whether or not the tokens are flagged *special*: the model is a reasoning model either
+    way, and the tags must stay non-special so they survive decoding (see `reasoning_tags_are_special`).
+    """
+    for start, end in DECLARED_REASONING_TAG_PAIRS:
+        if _tokenizer_has_tokens(tokenizer, start, end):
+            return (start, end)
+    return None
+
+
+def resolve_reasoning_tags(tokenizer) -> tuple[str, str]:
+    """The ``(start, end)`` reasoning tags for this model: its declared dedicated pair if any, else
+    the default ``<think>``/``</think>``. Used for the two-phase stop/split so the tags match what
+    the model actually emits."""
+    return declared_reasoning_tags(tokenizer) or (THINK_START_TAG, THINK_END_TAG)
+
+
+def reasoning_tags_are_special(tokenizer, tags: tuple[str, str]) -> bool:
+    """Whether both tags are flagged as *special* tokens.
+
+    When they are, decoding with ``skip_special_tokens=True`` (the default in every generative
+    backend) strips them from the output text, so the phase-1 stop (matched on the tag string) and
+    the downstream reasoning-tag stripping both fail silently. Such a model needs its reasoning tags
+    made non-special, or the output decoded with ``skip_special_tokens=False``.
+    """
+    special = set(getattr(tokenizer, "all_special_tokens", []) or [])
+    return all(tag in special for tag in tags)
+
+
+def ensure_reasoning_tags_decodable(tokenizer, tags: tuple[str, str], skip_special_tokens: bool) -> None:
+    """Raise if two-phase thinking generation would break because the reasoning tags are stripped.
+
+    Called when the model is a thinking model. When ``skip_special_tokens`` is in effect and the
+    reasoning tags are special tokens (see `reasoning_tags_are_special`), the tags never appear in
+    the decoded text: the phase-1 stop never fires and the reasoning is never delimited. We fail
+    fast with an actionable message rather than silently producing wrong results.
+    """
+    if skip_special_tokens and reasoning_tags_are_special(tokenizer, tags):
+        raise ValueError(
+            f"Reasoning tags {tags} are registered as special tokens, so decoding with "
+            "skip_special_tokens=True strips them from the generated text and two-phase thinking "
+            "generation cannot work (the reasoning is never delimited from the answer). Make these "
+            "tags non-special in the tokenizer, or run with skip_special_tokens=False."
+        )
 
 
 @dataclass
@@ -75,31 +145,35 @@ class ThinkingGenSample:
 GenerateFn = Callable[[list[list[int]], Optional[int], list[str], int], list[list[ThinkingGenSample]]]
 
 
-def prompt_primes_thinking(rendered_prompt: str) -> bool:
+def prompt_primes_thinking(rendered_prompt: str, tags: tuple[str, str] = (THINK_START_TAG, THINK_END_TAG)) -> bool:
     """Whether a rendered generation prompt primes an *open* reasoning block.
 
-    A thinking model's generation prompt ends inside an unclosed ``<think>`` (e.g. DeepSeek-R1
-    primes ``<think>\\n``), so the model must emit ``</think>`` before its answer. This must NOT
-    fire on templates that merely reference ``<think>`` when formatting *previous* assistant
+    A thinking model's generation prompt ends inside an unclosed start tag (e.g. DeepSeek-R1
+    primes ``<think>\\n``), so the model must emit the end tag before its answer. This must NOT
+    fire on templates that merely reference the start tag when formatting *previous* assistant
     turns but never open one for generation (e.g. OpenLLM-France/Luciole-1B-Instruct-1.1), nor on
     templates that emit an already-closed empty ``<think></think>`` block when reasoning is
-    disabled (e.g. Qwen3 with enable_thinking=False). We therefore require the last ``<think>``
-    to have no matching ``</think>`` after it.
+    disabled (e.g. Qwen3 with enable_thinking=False). We therefore require the last start tag
+    to have no matching end tag after it.
     """
-    idx = rendered_prompt.rfind(THINK_START_TAG)
+    start_tag, end_tag = tags
+    idx = rendered_prompt.rfind(start_tag)
     if idx == -1:
         return False
-    return THINK_END_TAG not in rendered_prompt[idx:]
+    return end_tag not in rendered_prompt[idx:]
 
 
 def detect_thinking_model(tokenizer, use_chat_template: bool, enable_thinking: Optional[bool]) -> bool:
     """Decide from the tokenizer chat template whether the model reasons before answering.
 
-    No chat template -> not a thinking model. Otherwise we render generation prompts and look for
-    either of two signals:
+    No chat template -> not a thinking model. Otherwise we look for any of three signals:
 
-    1. **Primes an open ``<think>``** (e.g. DeepSeek-R1): the configured generation prompt ends
-       inside an unclosed ``<think>`` (`prompt_primes_thinking`), so the model must reason first.
+    0. **Ships reasoning tokens** (e.g. Mistral/Magistral/Ministral ``[THINK]``/``[/THINK]``):
+       these dedicated vocabulary tokens (special or not) only ship with reasoning checkpoints, so
+       their presence is itself the signal. This is the *only* reliable template-level cue for such
+       models, because they self-emit the tags — nothing is primed in the prompt and there is no toggle.
+    1. **Primes an open start tag** (e.g. DeepSeek-R1): the configured generation prompt ends inside
+       an unclosed ``<think>`` (`prompt_primes_thinking`), so the model must reason first.
     2. **Toggle-responsive template** (e.g. Qwen3): turning thinking *off* changes the generation
        prompt around the ``<think>`` tag — Qwen3 injects an empty ``<think></think>`` to *suppress*
        reasoning when ``enable_thinking=False`` and omits it when enabled. If the on/off renders
@@ -108,14 +182,23 @@ def detect_thinking_model(tokenizer, use_chat_template: bool, enable_thinking: O
 
     Templates that merely mention ``<think>`` when re-encoding past assistant turns but render the
     *same* generation prompt regardless of ``enable_thinking`` (e.g. OpenLLM-France/Luciole-1B-
-    Instruct-1.1) match neither signal and are correctly treated as non-thinking. The fundamental
-    limit: a checkpoint that self-emits ``<think>`` while sharing such a template is indistinguishable
-    from a non-thinking sibling by the template alone — set ``thinking_budget`` to force it on there.
+    Instruct-1.1) match no signal and are correctly treated as non-thinking. The fundamental limit:
+    a checkpoint that self-emits ``<think>`` as a *plain string* (no special token) while sharing
+    such a template is indistinguishable from a non-thinking sibling — set ``thinking_budget`` to
+    force it on there.
     """
     if not use_chat_template:
         return False
     if getattr(tokenizer, "chat_template", None) is None:
         return False
+
+    # Signal 0: the model ships dedicated reasoning tokens (e.g. Mistral [THINK]/[/THINK]), special
+    # or not. This is structural evidence that the model reasons, so (like signal 1) it fires
+    # regardless of ``enable_thinking``: such models self-emit the tags and have no toggle to suppress.
+    if declared_reasoning_tags(tokenizer) is not None:
+        return True
+
+    tags = resolve_reasoning_tags(tokenizer)
 
     def _render(et: Optional[bool]) -> str:
         extra = {} if et is None else {"enable_thinking": et}
@@ -126,7 +209,7 @@ def detect_thinking_model(tokenizer, use_chat_template: bool, enable_thinking: O
             **extra,
         )
 
-    # Signal 1: the configured generation prompt primes an open <think>.
+    # Signal 1: the configured generation prompt primes an open start tag.
     try:
         rendered_cfg = _render(enable_thinking)
     except Exception:
@@ -135,23 +218,23 @@ def detect_thinking_model(tokenizer, use_chat_template: bool, enable_thinking: O
         except Exception as e:
             logger.warning(f"Could not render chat template to detect a thinking model: {e}")
             return False
-    if prompt_primes_thinking(rendered_cfg):
+    if prompt_primes_thinking(rendered_cfg, tags):
         return True
 
-    # The user explicitly disabled reasoning: honour it, do not probe further.
+    # The user explicitly disabled reasoning: honour it for the toggle probe below.
     if enable_thinking is False:
         return False
 
     # Signal 2: a thinking-mode template renders a different generation prompt when reasoning is
     # turned off (Qwen3 injects an empty <think></think> to suppress it). If on/off differ around
-    # the <think> tag, the model reasons when thinking is enabled (the configured/default mode).
+    # the start tag, the model reasons when thinking is enabled (the configured/default mode).
     try:
         rendered_on = _render(True)
         rendered_off = _render(False)
     except Exception:
         # Template does not support the enable_thinking toggle -> no signal-2 evidence.
         return False
-    return rendered_on != rendered_off and (THINK_START_TAG in rendered_off or THINK_START_TAG in rendered_on)
+    return rendered_on != rendered_off and (tags[0] in rendered_off or tags[0] in rendered_on)
 
 
 def resolve_is_thinking_model(
@@ -183,21 +266,23 @@ def two_phase_generate(
     num_samples: int,
     generate_fn: GenerateFn,
     close_tag_ids: list[int],
+    end_tag: str = THINK_END_TAG,
 ) -> list[ModelResponse]:
     """Two-phase generation for thinking models, shared by every generative backend.
 
-    Phase 1 generates the reasoning, stopping at ``</think>`` (or at ``thinking_budget`` tokens).
-    We always re-append a ``</think>`` afterwards, which both closes a reasoning that ran out of
+    Phase 1 generates the reasoning, stopping at the end tag (or at ``thinking_budget`` tokens).
+    We always re-append the end tag afterwards, which both closes a reasoning that ran out of
     budget without stopping and restores the tag the stop condition strips, so the answer phase
-    always starts from a well-formed ``...</think>``. Phase 2 generates the answer with
+    always starts from a well-formed ``...<end_tag>``. Phase 2 generates the answer with
     ``answer_budget`` tokens. The returned text/tokens concatenate both phases, so downstream
     reasoning-tag stripping and the details logs see the full generation.
 
-    ``generate_fn`` is the backend primitive (see `GenerateFn`); ``close_tag_ids`` are the token
-    ids of ``</think>`` for this tokenizer.
+    ``generate_fn`` is the backend primitive (see `GenerateFn`); ``end_tag`` is the reasoning end
+    tag (``</think>`` or e.g. Mistral ``[/THINK]``) and ``close_tag_ids`` are its token ids for
+    this tokenizer.
     """
-    # Phase 1: reasoning, stopped right at </think>.
-    thinking_samples = generate_fn(inputs, thinking_budget, [THINK_END_TAG], num_samples)
+    # Phase 1: reasoning, stopped right at the end tag.
+    thinking_samples = generate_fn(inputs, thinking_budget, [end_tag], num_samples)
 
     phase2_inputs: list[list[int]] = []
     thinking_texts: list[str] = []
@@ -206,9 +291,9 @@ def two_phase_generate(
     for i, samples in enumerate(thinking_samples):
         samples_per_doc.append(len(samples))
         for sample in samples:
-            # generate_fn returns text/tokens without the </think> stop: close it explicitly (this
-            # also closes a reasoning that hit the budget without ever emitting </think>).
-            text = sample.text + THINK_END_TAG
+            # generate_fn returns text/tokens without the end-tag stop: close it explicitly (this
+            # also closes a reasoning that hit the budget without ever emitting the end tag).
+            text = sample.text + end_tag
             tokens = list(sample.token_ids) + close_tag_ids
             thinking_texts.append(text)
             thinking_tokens.append(tokens)
