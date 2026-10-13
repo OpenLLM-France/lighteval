@@ -34,10 +34,14 @@ import numpy as np
 import sacrebleu
 import sklearn.metrics
 
+from dataclasses import dataclass
+
 from lighteval.metrics.sample_preparator import (
+    CorpusMetricInput,
     GenerativeCorpusMetricInput,
     LogprobCorpusMetricInput,
     PerplexityCorpusMetricInput,
+    Preparator,
 )
 from lighteval.utils.utils import as_list
 
@@ -128,7 +132,10 @@ class CorpusLevelTranslationMetric(CorpusLevelComputation):
         if self.metric_type == "bleu":
             import nltk
 
-            nltk.download("punkt_tab")
+            try:  # NEVER hit the network: sacrebleu tokenizes on its own, punkt_tab isn't required, and
+                nltk.data.find("tokenizers/punkt_tab")  # this runs in ~1000 bootstrap workers where an
+            except LookupError:  # nltk.download() online update-check hangs/times out on offline nodes.
+                pass
             return sacrebleu.BLEU(trg_lang=self.lang)
         elif self.metric_type == "chrf":
             return sacrebleu.CHRF()
@@ -190,3 +197,130 @@ class CorpusLevelPerplexityMetric(CorpusLevelComputation):
             return math.exp(-sum(logprobs) / sum(weights))
         if self.metric_type == "bits_per_byte":
             return -sum(logprobs) / sum(weights) * 1 / math.log(2)
+
+
+# --------------------------------------------------------------------------------------------------
+# Neural MT metrics (COMET, MetricX) as CORPUS-level: score the whole set in one batched pass, on GPU.
+# The per-sample (SampleLevelMetric) versions re-init a Lightning Trainer / forward per example -> hours
+# for a full test set. These score all samples in one predict() call -> minutes. Auto-use GPU if present.
+# --------------------------------------------------------------------------------------------------
+@dataclass
+class MTWithSourceCorpusMetricInput(CorpusMetricInput):
+    """Per-sample input for reference+source MT metrics (COMET/MetricX): keeps the source segment too."""
+
+    source: str
+    gold: str
+    pred: str
+
+
+class MTSourcePreparator(Preparator):
+    """Cheap per-sample step: emit (source, gold, pred). The heavy scoring happens once at corpus level."""
+
+    def __init__(self, source_column: str = "source"):
+        self.source_column = source_column
+
+    def prepare(self, doc, model_response, **kwargs) -> MTWithSourceCorpusMetricInput:
+        return MTWithSourceCorpusMetricInput(
+            source=doc.specific[self.source_column],
+            gold=doc.get_golds()[0],
+            pred=model_response.final_text[0],
+        )
+
+
+class CorpusLevelCOMET(CorpusLevelComputation):
+    def __init__(self, model_name: str = "Unbabel/wmt22-comet-da", batch_size: int = 64, gpus=None, accelerator=None):
+        import torch as _torch
+
+        _cuda = _torch.cuda.is_available()
+        self.model_name = model_name
+        self.batch_size = batch_size
+        self.gpus = (1 if _cuda else 0) if gpus is None else gpus
+        self.accelerator = ("cuda" if _cuda else "cpu") if accelerator is None else accelerator
+        self._model = None
+        # Per-sample score cache keyed by (source, gold, pred). CRUCIAL: stderr is computed by
+        # bootstrap_stderr, which re-calls this ~1000x on RESAMPLED items (info_loggers.py). Without a
+        # cache that would re-run the neural model ~1000x (~50h). With it, the model runs once over the
+        # unique items and every bootstrap resample is a dict lookup + mean.
+        self._cache: dict = {}
+
+    def __getstate__(self):
+        # bootstrap_stderr pickles this metric into mp.Pool workers. The loaded COMET model carries
+        # an unpicklable GPU forward hook (ROCm) -> drop it: workers only ever hit the populated cache.
+        state = self.__dict__.copy()
+        state["_model"] = None
+        return state
+
+    def compute_corpus(self, items: list[MTWithSourceCorpusMetricInput]) -> float:
+        keys = [(i.source, i.gold, i.pred) for i in items]
+        missing = [k for k in dict.fromkeys(keys) if k not in self._cache]  # unique, order-preserving
+        if missing:
+            if self._model is None:
+                from comet import download_model, load_from_checkpoint
+
+                logger.info(f"Loading COMET model {self.model_name} (corpus, batched)...")
+                self._model = load_from_checkpoint(download_model(self.model_name))
+            data = [{"src": k[0], "mt": k[2], "ref": k[1]} for k in missing]
+            # num_workers=0: the model carries an unpicklable GPU forward hook on ROCm -> worker spawn fails.
+            output = self._model.predict(
+                data, batch_size=self.batch_size, gpus=self.gpus, accelerator=self.accelerator,
+                num_workers=0, progress_bar=False,
+            )
+            for k, s in zip(missing, output.scores):
+                self._cache[k] = float(s) * 100
+        return float(np.mean([self._cache[k] for k in keys]))
+
+
+class CorpusLevelMetricX(CorpusLevelComputation):
+    def __init__(
+        self,
+        model_name: str = "google/metricx-24-hybrid-large-v2p6",
+        tokenizer_name: str = "google/mt5-large",
+        batch_size: int = 16,
+        device=None,
+    ):
+        import torch as _torch
+
+        self.model_name = model_name
+        self.tokenizer_name = tokenizer_name
+        self.batch_size = batch_size
+        self.device = ("cuda" if _torch.cuda.is_available() else "cpu") if device is None else device
+        self._model = None
+        self._tokenizer = None
+        self._cache: dict = {}  # per-sample cache (source,gold,pred)->score; see CorpusLevelCOMET note
+
+    def __getstate__(self):
+        # See CorpusLevelCOMET.__getstate__: drop the loaded model/tokenizer before pickling into
+        # bootstrap_stderr mp.Pool workers; they only read the already-populated cache.
+        state = self.__dict__.copy()
+        state["_model"] = None
+        state["_tokenizer"] = None
+        return state
+
+    def compute_corpus(self, items: list[MTWithSourceCorpusMetricInput]) -> float:
+        import torch
+        from transformers import AutoTokenizer
+
+        from lighteval.metrics.imports.metricx_model import MetricXModel
+
+        keys = [(i.source, i.gold, i.pred) for i in items]
+        missing = list(dict.fromkeys(k for k in keys if k not in self._cache))  # unique, order-preserving
+        if missing:
+            if self._model is None:
+                logger.info(f"Loading MetricX model {self.model_name} (corpus, batched)...")
+                self._model = MetricXModel(self.model_name, device=self.device)
+                self._tokenizer = AutoTokenizer.from_pretrained(self.tokenizer_name)
+            texts = [f"candidate: {k[2]} reference: {k[1]} source: {k[0]}" for k in missing]
+            for start in range(0, len(texts), self.batch_size):
+                ck_keys = missing[start : start + self.batch_size]
+                enc = [self._tokenizer(t, truncation=True, max_length=1024) for t in texts[start : start + self.batch_size]]
+                for e in enc:  # MetricX drops the trailing EOS the tokenizer appends
+                    e["input_ids"] = e["input_ids"][:-1]
+                    e["attention_mask"] = e["attention_mask"][:-1]
+                batch = self._tokenizer.pad(enc, return_tensors="pt")
+                input_ids = batch["input_ids"].to(self.device)
+                attention_mask = batch["attention_mask"].to(self.device)
+                with torch.no_grad():
+                    preds = self._model.predict(input_ids, attention_mask)
+                for k, s in zip(ck_keys, preds.detach().cpu().tolist()):
+                    self._cache[k] = float(s)
+        return float(np.mean([self._cache[k] for k in keys]))
