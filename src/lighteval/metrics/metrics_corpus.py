@@ -28,13 +28,12 @@ A number of these aggregations come from the EleutherAIHarness
 import logging
 import math
 from abc import ABC, abstractmethod
+from dataclasses import dataclass
 from typing import Literal
 
 import numpy as np
 import sacrebleu
 import sklearn.metrics
-
-from dataclasses import dataclass
 
 from lighteval.metrics.sample_preparator import (
     CorpusMetricInput,
@@ -262,8 +261,12 @@ class CorpusLevelCOMET(CorpusLevelComputation):
             data = [{"src": k[0], "mt": k[2], "ref": k[1]} for k in missing]
             # num_workers=0: the model carries an unpicklable GPU forward hook on ROCm -> worker spawn fails.
             output = self._model.predict(
-                data, batch_size=self.batch_size, gpus=self.gpus, accelerator=self.accelerator,
-                num_workers=0, progress_bar=False,
+                data,
+                batch_size=self.batch_size,
+                gpus=self.gpus,
+                accelerator=self.accelerator,
+                num_workers=0,
+                progress_bar=False,
             )
             for k, s in zip(missing, output.scores):
                 self._cache[k] = float(s) * 100
@@ -312,7 +315,10 @@ class CorpusLevelMetricX(CorpusLevelComputation):
             texts = [f"candidate: {k[2]} reference: {k[1]} source: {k[0]}" for k in missing]
             for start in range(0, len(texts), self.batch_size):
                 ck_keys = missing[start : start + self.batch_size]
-                enc = [self._tokenizer(t, truncation=True, max_length=1024) for t in texts[start : start + self.batch_size]]
+                enc = [
+                    self._tokenizer(t, truncation=True, max_length=1024)
+                    for t in texts[start : start + self.batch_size]
+                ]
                 for e in enc:  # MetricX drops the trailing EOS the tokenizer appends
                     e["input_ids"] = e["input_ids"][:-1]
                     e["attention_mask"] = e["attention_mask"][:-1]

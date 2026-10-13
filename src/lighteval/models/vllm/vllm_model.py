@@ -472,7 +472,8 @@ class VLLMModel(LightevalModel):
             "seed": int(config.seed),
             "max_num_seqs": int(config.max_num_seqs),
             "max_num_batched_tokens": int(config.max_num_batched_tokens),
-            "enforce_eager": os.environ.get("LIGHTEVAL_ENFORCE_EAGER", "1").strip().lower() not in ("0", "false", "no"),
+            "enforce_eager": os.environ.get("LIGHTEVAL_ENFORCE_EAGER", "1").strip().lower()
+            not in ("0", "false", "no"),
         }
         if os.environ.get("LIGHTEVAL_LIMIT_MM_IMAGE"):
             self.model_args["limit_mm_per_prompt"] = {"image": int(os.environ["LIGHTEVAL_LIMIT_MM_IMAGE"])}
@@ -486,6 +487,7 @@ class VLLMModel(LightevalModel):
         _hfo = os.environ.get("LIGHTEVAL_HF_OVERRIDES")
         if _hfo:
             import json as _json
+
             self.model_args.setdefault("hf_overrides", {}).update(_json.loads(_hfo))
         if self._max_length:
             self.model_args.setdefault("hf_overrides", {})["max_position_embeddings"] = self._max_length
@@ -922,7 +924,8 @@ class AsyncVLLMModel(VLLMModel):
             "seed": int(config.seed),
             "max_num_seqs": int(config.max_num_seqs),
             "max_num_batched_tokens": int(config.max_num_batched_tokens),
-            "enforce_eager": os.environ.get("LIGHTEVAL_ENFORCE_EAGER", "1").strip().lower() not in ("0", "false", "no"),
+            "enforce_eager": os.environ.get("LIGHTEVAL_ENFORCE_EAGER", "1").strip().lower()
+            not in ("0", "false", "no"),
         }
         if config.max_images is not None:
             self.model_args["limit_mm_per_prompt"] = {"image": config.max_images}
@@ -935,6 +938,7 @@ class AsyncVLLMModel(VLLMModel):
         _hfo = os.environ.get("LIGHTEVAL_HF_OVERRIDES")
         if _hfo:
             import json as _json
+
             self.model_args.setdefault("hf_overrides", {}).update(_json.loads(_hfo))
 
         if config.data_parallel_size > 1:

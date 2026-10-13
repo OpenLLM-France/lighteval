@@ -284,7 +284,9 @@ class EvaluationTracker:
                     dataset = dataset.select_columns(sorted(column_names))
                     details_datasets[task_name] = dataset
                 except Exception as e:
-                    logger.error(f"Could not build the details dataset for task '{task_name}': {type(e).__name__}: {e}")
+                    logger.error(
+                        f"Could not build the details dataset for task '{task_name}': {type(e).__name__}: {e}"
+                    )
                     details_errors.append(f"{task_name}: {type(e).__name__}: {e}")
 
         if self.should_save_details:
