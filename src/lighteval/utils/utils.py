@@ -310,6 +310,12 @@ def remove_reasoning_tags(text: str, tag_pairs: list[tuple[str, str]] = DEFAULT_
         >>> tag_pairs = [("<reasoning>", "</reasoning>")]
         >>> remove_reasoning_tags(text, tag_pairs)
         'Answer'
+
+        Reasoning models that *prime* the opening tag in the generation prompt (e.g. DeepSeek-R1,
+        Olmo-Think) emit only the closing tag, so the content before it is still reasoning:
+
+        >>> remove_reasoning_tags("Reasoning section </think> Answer section", [("<think>", "</think>")])
+        ' Answer section'
     """
     result = text
 
@@ -321,6 +327,12 @@ def remove_reasoning_tags(text: str, tag_pairs: list[tuple[str, str]] = DEFAULT_
                 result = result[:start] + result[end + len(end_tag) :]
             else:
                 break
+
+        # Handle a primed opening tag: when the generation prompt ends inside an open reasoning
+        # block, the model output carries only the closing tag (an orphan end_tag with no start_tag).
+        # Everything up to and including the first closing tag is the reasoning, so drop it.
+        if end_tag in result and start_tag not in result:
+            result = result[result.find(end_tag) + len(end_tag) :]
 
     return result
 
