@@ -207,8 +207,3 @@ TASKS_TABLE.extend(
         for subset in SUBSETS
     ]
 )
-
-print(f"Total tasks registered: {len(TASKS_TABLE)}")
-print("Tasks:")
-for task in TASKS_TABLE:
-    print(f"  {task.name}")
