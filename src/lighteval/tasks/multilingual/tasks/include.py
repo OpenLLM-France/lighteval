@@ -181,7 +181,6 @@ def _make_prompt_fn(language, formulation):
 def _make_task(language_name, code, language, formulation):
     return LightevalTaskConfig(
         name=f"include_{code}_{formulation.name.lower()}",
-        suite=["community"],
         prompt_function=_make_prompt_fn(language, formulation),
         hf_repo=HF_REPO,
         hf_subset=language_name,
@@ -268,7 +267,6 @@ include_generative_metric = SampleLevelMetric(
 def _make_generative_task(language_name, code):
     return LightevalTaskConfig(
         name=f"include_{code}_gen",
-        suite=["community"],
         prompt_function=_generative_prompt_fn,
         hf_repo=HF_REPO,
         hf_subset=language_name,

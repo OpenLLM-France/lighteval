@@ -189,7 +189,6 @@ piqa_generative_metric = SampleLevelMetric(
 def _make_loglikelihood_task(code, hf_subset):
     return LightevalTaskConfig(
         name=f"piqa_{code}",
-        suite=["community"],
         prompt_function=piqa_loglikelihood_prompt_fn,
         hf_repo=HF_REPO,
         hf_subset=hf_subset,
@@ -215,7 +214,6 @@ def _make_loglikelihood_task(code, hf_subset):
 def _make_generative_task(code, hf_subset):
     return LightevalTaskConfig(
         name=f"piqa_{code}_gen",
-        suite=["community"],
         prompt_function=piqa_generative_prompt_fn,
         hf_repo=HF_REPO,
         hf_subset=hf_subset,

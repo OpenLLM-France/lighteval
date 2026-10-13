@@ -127,7 +127,6 @@ def _make_prompt_fn(instruction):
 def _make_task(code, hf_subset, instruction):
     return LightevalTaskConfig(
         name=f"aime25-{code}",
-        suite=["community"],
         prompt_function=_make_prompt_fn(instruction),
         hf_repo=HF_REPO,
         hf_subset=hf_subset,

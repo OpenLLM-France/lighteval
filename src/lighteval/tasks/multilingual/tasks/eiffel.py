@@ -1,10 +1,11 @@
+from functools import partial
+
 from lighteval.metrics.dynamic_metrics import LogLikelihoodAccMetric
 from lighteval.metrics.metrics import Metrics
-from lighteval.tasks.requests import Doc
 from lighteval.metrics.normalizations import LogProbCharNorm, LogProbTokenNorm
-from lighteval.tasks.default_prompts import LETTER_INDICES
 from lighteval.tasks.lighteval_task import LightevalTaskConfig
 from lighteval.tasks.multilingual.utils.task_utils import get_metrics_for_formulation
+from lighteval.tasks.requests import Doc
 from lighteval.tasks.templates.multichoice import get_mcq_prompt_function
 from lighteval.tasks.templates.utils.formulation import (
     CFFormulation,
@@ -12,7 +13,9 @@ from lighteval.tasks.templates.utils.formulation import (
     MCFFormulation,
 )
 from lighteval.utils.language import Language
-from functools import partial
+
+
+LETTER_INDICES = list("ABCDEFGHIJKLMNOPQRSTUVWXYZ")
 
 TASKS_TABLE = []
 
@@ -34,15 +37,11 @@ def get_choices_and_gold_from_line(line, use_context, gold_column="answer"):
         sentence_context.replace("< ...>", line["answer D"]),
     ]
     gold_value = line[gold_column]
-    gold_idx = (
-        int(gold_value) - 1
-        if gold_value.isdigit()
-        else LETTER_INDICES.index(gold_value)
-    )
+    gold_idx = int(gold_value) - 1 if gold_value.isdigit() else LETTER_INDICES.index(gold_value)
     return choices, gold_idx
 
 
-#### Idiomatic Expressions MCQ tasks
+# Idiomatic Expressions MCQ tasks
 def process_line(line, use_context, gold_column="answer"):
     question = "Quelle est l'expression idiomatique parmi les 4 propositions suivantes?"
     choices, gold_idx = get_choices_and_gold_from_line(line, use_context, gold_column=gold_column)
@@ -68,7 +67,6 @@ TASKS_TABLE.extend(
                 ),
                 formulation=formulation,
             ),
-            suite=["community"],
             hf_repo="OpenLLM-France/EIFFEL_v3",
             hf_subset=subset,
             evaluation_splits=("test",),
@@ -88,7 +86,7 @@ TASKS_TABLE.extend(
     ]
 )
 
-# MCQ tasks "English distractor" 
+# MCQ tasks "English distractor"
 TASKS_TABLE.extend(
     [
         LightevalTaskConfig(
@@ -102,7 +100,6 @@ TASKS_TABLE.extend(
                 ),
                 formulation=formulation,
             ),
-            suite=["community"],
             hf_repo="OpenLLM-France/EIFFEL_v3",
             hf_subset=subset,
             evaluation_splits=("test",),
@@ -121,6 +118,7 @@ TASKS_TABLE.extend(
         for use_context in [True, False]
     ]
 )
+
 
 # Idiomatic Expressions FIN tasks
 def prompt_fn(line, task_name: str, use_context: bool, gold_column: str = "answer") -> Doc:
@@ -138,7 +136,6 @@ TASKS_TABLE.extend(
         LightevalTaskConfig(
             name=f"eiffel_fib{'_context' if use_context else ''}:{subset.lower().replace(' ', '_')}",
             prompt_function=partial(prompt_fn, use_context=use_context),
-            suite=["community"],
             hf_repo="OpenLLM-France/EIFFEL_v3",
             hf_subset=subset,
             evaluation_splits=("test",),
@@ -150,7 +147,7 @@ TASKS_TABLE.extend(
     ]
 )
 
-#FIB tasks "English distractor" 
+# FIB tasks "English distractor"
 TASKS_TABLE.extend(
     [
         LightevalTaskConfig(
@@ -160,7 +157,6 @@ TASKS_TABLE.extend(
                 use_context=use_context,
                 gold_column=ENGLISH_DISTRACTOR_COLUMN,
             ),
-            suite=["community"],
             hf_repo="OpenLLM-France/EIFFEL_v3",
             hf_subset=subset,
             evaluation_splits=("test",),
@@ -171,11 +167,6 @@ TASKS_TABLE.extend(
         for use_context in [True, False]
     ]
 )
-
-print(f"Total tasks registered: {len(TASKS_TABLE)}")
-print("Tasks:")
-for task in TASKS_TABLE:
-    print(f"  {task.name}")
 
 
 # Translation
@@ -203,7 +194,6 @@ TASKS_TABLE.extend(
         LightevalTaskConfig(
             name=f"eiffel_translation:{subset.lower().replace(' ', '_')}",
             prompt_function=prompt_fn,
-            suite=["community"],
             hf_repo="OpenLLM-France/EIFFEL",
             hf_subset=subset,
             hf_filter=lambda x: x["French"] != "///" and x["English"] != "///",

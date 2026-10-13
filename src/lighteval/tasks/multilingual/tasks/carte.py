@@ -142,7 +142,6 @@ from lighteval.metrics.utils.metric_utils import (
     SampleLevelMetricGrouping,
     SamplingMethod,
 )
-from lighteval.tasks.default_prompts import LETTER_INDICES
 from lighteval.tasks.lighteval_task import LightevalTaskConfig
 from lighteval.tasks.multilingual.utils.task_utils import get_metrics_for_formulation
 from lighteval.tasks.requests import Doc
@@ -155,6 +154,8 @@ from lighteval.tasks.templates.utils.formulation import (
 from lighteval.utils.language import Language
 from lighteval.utils.utils import as_list
 
+
+LETTER_INDICES = list("ABCDEFGHIJKLMNOPQRSTUVWXYZ")
 
 HF_REPO = "ScarAlcar/CARTE"
 IDK_TEXT = "je ne sais pas"
@@ -490,7 +491,6 @@ def _make_mcq_task(benchmark, formulation, prompt_key, hf_filter):
     return LightevalTaskConfig(
         name=f"{benchmark}_{formulation.name.lower()}{_prompt_suffix(prompt_key)}",
         prompt_function=_mcq_prompt(formulation, instruction),
-        suite=["community"],
         hf_repo=HF_REPO,
         hf_subset="default",
         hf_filter=hf_filter,
@@ -510,7 +510,6 @@ def _make_generative_task(benchmark, prompt_key, hf_filter):
     return LightevalTaskConfig(
         name=f"{benchmark}_generative{_prompt_suffix(prompt_key)}",
         prompt_function=_generative_prompt(instruction),
-        suite=["community"],
         hf_repo=HF_REPO,
         hf_subset="default",
         hf_filter=hf_filter,

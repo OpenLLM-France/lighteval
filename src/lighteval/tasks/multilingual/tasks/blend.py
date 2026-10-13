@@ -186,7 +186,6 @@ blend_metric = SampleLevelMetricGrouping(
 def _make_task(code, split):
     return LightevalTaskConfig(
         name=f"blend_{code}",
-        suite=["community"],
         prompt_function=blend_prompt_fn,
         hf_repo=HF_REPO,
         hf_subset=HF_CONFIG,

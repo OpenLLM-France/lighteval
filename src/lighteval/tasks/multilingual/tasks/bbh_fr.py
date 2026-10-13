@@ -396,7 +396,6 @@ _METRIC = SampleLevelMetric(
 def _make_task(name, hf_repo, hf_subset, prompt_fn):
     return LightevalTaskConfig(
         name=name,
-        suite=["community"],
         prompt_function=prompt_fn,
         hf_repo=hf_repo,
         hf_subset=hf_subset,
