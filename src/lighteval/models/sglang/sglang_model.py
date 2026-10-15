@@ -31,6 +31,14 @@ from tqdm import tqdm
 from lighteval.data import GenerativeTaskDataset, LoglikelihoodDataset
 from lighteval.models.abstract_model import LightevalModel, ModelConfig
 from lighteval.models.model_output import ModelResponse
+from lighteval.models.thinking import (
+    DEFAULT_THINKING_BUDGET,
+    ThinkingGenSample,
+    ensure_reasoning_tags_decodable,
+    resolve_is_thinking_model,
+    resolve_reasoning_tags,
+    two_phase_generate,
+)
 from lighteval.models.utils import _simplify_name, uses_chat_template
 from lighteval.tasks.prompt_manager import PromptManager
 from lighteval.tasks.requests import Doc, SamplingMethod
@@ -145,13 +153,15 @@ class SGLangModel(LightevalModel):
     ):
         """Initializes an SGLang model."""
         self.config = config
-        self.use_chat_template = uses_chat_template(
-            model_name=self.config.model_name, override_chat_template=config.override_chat_template
-        )
         self.data_parallel_size = config.dp_size
         self.tensor_parallel_size = config.tp_size
         self._add_special_tokens = config.add_special_tokens
         self._tokenizer = self._create_auto_tokenizer(config)
+        # Inspect the tokenizer we actually loaded (rather than reloading by name), so chat-template
+        # detection matches the tokenizer used for inference.
+        self.use_chat_template = uses_chat_template(
+            tokenizer=self._tokenizer, override_chat_template=config.override_chat_template
+        )
         self._max_length = config.context_length if config.context_length is not None else None
         self.model = self._create_auto_model(config)
         self.model_name = _simplify_name(config.model_name)
@@ -161,7 +171,30 @@ class SGLangModel(LightevalModel):
         self.sampling_backend = config.sampling_backend
         self.attention_backend = config.attention_backend
         self.pairwise_tokenization = config.pairwise_tokenization
-        self.prompt_manager = PromptManager(self.use_chat_template, self.tokenizer, config.system_prompt)
+        self.prompt_manager = PromptManager(
+            self.use_chat_template, self.tokenizer, config.system_prompt, enable_thinking=config.enable_thinking
+        )
+
+        # Decide whether to use two-phase thinking generation, so the reasoning
+        # (<think>...</think>) and the answer are budgeted separately (see _greedy_until).
+        self.is_thinking_model = resolve_is_thinking_model(
+            self.tokenizer,
+            self.use_chat_template,
+            config.enable_thinking,
+            config.generation_parameters.thinking_budget is not None,
+        )
+        # Reasoning tags this model actually emits (``<think>``/``</think>`` by default, or e.g.
+        # Mistral ``[THINK]``/``[/THINK]`` when declared as special tokens).
+        self.reasoning_tags = resolve_reasoning_tags(self.tokenizer)
+        if self.is_thinking_model:
+            logger.info(
+                "Detected a thinking model: reasoning will be generated with a separate budget "
+                f"(thinking_budget={self.config.generation_parameters.thinking_budget or DEFAULT_THINKING_BUDGET}) "
+                f"and generation_size will apply only to the answer after {self.reasoning_tags[1]}."
+            )
+            # SGLang decodes with skip_special_tokens=True by default: special reasoning tags would
+            # be stripped and break the two-phase stop/split, so fail fast instead of scoring garbage.
+            ensure_reasoning_tags_decodable(self.tokenizer, self.reasoning_tags, skip_special_tokens=True)
 
         # Initialize cache for tokenization and predictions
         self._cache = SampleCache(config)
@@ -270,16 +303,25 @@ class SGLangModel(LightevalModel):
             inputs = tokenized["input_ids"]
             context_size = len(inputs[0])
 
+            # For thinking models, generation_size budgets only the answer (after </think>); the
+            # reasoning gets its own budget, and the context must leave room for both phases.
+            if self.is_thinking_model:
+                thinking_budget = self.config.generation_parameters.thinking_budget or DEFAULT_THINKING_BUDGET
+                truncation_budget = thinking_budget + (max_new_tokens or 0)
+            else:
+                thinking_budget = None
+                truncation_budget = max_new_tokens
+
             # left truncate the inputs to the maximum length
-            if max_new_tokens is not None:
-                if context_size + max_new_tokens > self.max_length:
+            if truncation_budget is not None:
+                if context_size + truncation_budget > self.max_length:
                     logger.warning(
-                        f"{context_size + max_new_tokens=} which is greater than {self.max_length=}. Truncating context to {self.max_length - max_new_tokens} tokens."
+                        f"{context_size + truncation_budget=} which is greater than {self.max_length=}. Truncating context to {self.max_length - truncation_budget} tokens."
                     )
-                    context_size = self.max_length - max_new_tokens
+                    context_size = self.max_length - truncation_budget
                     if context_size < 0:
                         logger.critical(
-                            f"{context_size=} is less than 0, either reduce the max_new_tokens or increase model max length."
+                            f"{context_size=} is less than 0, either reduce the max_new_tokens/thinking_budget or increase model max length."
                         )
                         raise ValueError("Context size is less than 0.")
                     inputs = [input[-context_size:] for input in inputs]
@@ -290,6 +332,21 @@ class SGLangModel(LightevalModel):
                     )
                     context_size = self.max_length
                     inputs = [input[-context_size:] for input in inputs]
+
+            if self.is_thinking_model:
+                results.extend(
+                    two_phase_generate(
+                        inputs=inputs,
+                        context=contexts,
+                        thinking_budget=thinking_budget,
+                        answer_budget=max_new_tokens,
+                        num_samples=num_samples,
+                        generate_fn=self._thinking_generate_fn,
+                        close_tag_ids=self.tokenizer.encode(self.reasoning_tags[1], add_special_tokens=False),
+                        end_tag=self.reasoning_tags[1],
+                    )
+                )
+                continue
 
             sglang_outputs = self._generate(
                 inputs=inputs,
@@ -312,6 +369,37 @@ class SGLangModel(LightevalModel):
                 )
                 results.append(cur_response)
         return dataset.get_original_order(results)
+
+    def _thinking_generate_fn(
+        self,
+        inputs: list[list[int]],
+        max_new_tokens: Optional[int],
+        stop_tokens: list[str],
+        stop_thinking_token_ids: list[int],
+        num_samples: int,
+    ) -> list[list[ThinkingGenSample]]:
+        """Backend primitive for two_phase_generate (see lighteval.models.thinking).
+
+        This backend stops on the end-tag *string* (``stop_thinking_token_ids`` is only used by backends that
+        support token-id stops; a model needing it is rejected up front by
+        ``ensure_reasoning_tags_decodable`` with token_id_stop_supported=False).
+
+        SGLang excludes the stop string from the returned text; we re-encode that text to get
+        token ids that are consistent with it and likewise free of the </think> stop, as the
+        two_phase_generate contract requires. One sample per prompt (matching _greedy_until).
+        """
+        outputs = self._generate(
+            inputs=inputs,
+            max_new_tokens=max_new_tokens,
+            stop_tokens=stop_tokens,
+            num_samples=num_samples,
+        )
+        result = []
+        for output in outputs:
+            text = output["text"]
+            token_ids = self.tokenizer.encode(text, add_special_tokens=False)
+            result.append([ThinkingGenSample(text=text, token_ids=token_ids)])
+        return result
 
     @requires("sglang")
     def _generate(

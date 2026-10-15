@@ -91,7 +91,7 @@ class PipelineParameters:
     max_samples: int | None = None
     cot_prompt: str | None = None
     remove_reasoning_tags: bool = True
-    reasoning_tags: str | list[tuple[str, str]] = "[('<think>', '</think>')]"
+    reasoning_tags: str | list[tuple[str, str]] = "[('<think>', '</think>'), ('[THINK]', '[/THINK]')]"
     load_responses_from_details_date_id: str | None = None
     bootstrap_iters: int = 1000
     load_tasks_multilingual: bool = False
@@ -226,6 +226,8 @@ class Pipeline:
 
         self.sampling_docs = collections.defaultdict(list)
         for _, docs in self.documents_dict.items():
+            if docs is None:
+                continue
             for doc in docs:
                 for sampling in doc.sampling_methods:
                     self.sampling_docs[sampling].append(doc)

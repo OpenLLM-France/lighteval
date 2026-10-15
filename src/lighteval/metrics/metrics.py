@@ -32,16 +32,20 @@ from lighteval.metrics.dynamic_metrics import MultilingualExtractiveMatchMetric
 from lighteval.metrics.harness_compatibility.drop import DropMetrics
 from lighteval.metrics.harness_compatibility.truthful_qa import TruthfulqaMCMetrics
 from lighteval.metrics.metrics_corpus import (
+    CorpusLevelCOMET,
     CorpusLevelF1Score,
+    CorpusLevelMetricX,
     CorpusLevelPerplexityMetric,
     CorpusLevelTranslationMetric,
     MatthewsCorrCoef,
+    MTSourcePreparator,
 )
 from lighteval.metrics.metrics_sample import (
     BLEU,
     BLEURT,
     MRR,
     ROUGE,
+    RULER,
     AccGoldLikelihood,
     AvgAtN,
     BertScore,
@@ -207,7 +211,6 @@ class Metrics(Enum):
         corpus_level_fn=np.mean,
         higher_is_better=True,
     )
-
     bleurt = SampleLevelMetric(
         metric_name="bleurt",
         sample_level_fn=BLEURT(),
@@ -234,6 +237,13 @@ class Metrics(Enum):
         sample_level_fn=GenerativePreparator(),
         category=SamplingMethod.GENERATIVE,
         corpus_level_fn=CorpusLevelTranslationMetric("chrf++"),
+        higher_is_better=True,
+    )
+    comet = CorpusLevelMetric(
+        metric_name="comet",
+        sample_level_fn=MTSourcePreparator(),  # cheap: emit (source, gold, pred) per sample
+        category=SamplingMethod.GENERATIVE,
+        corpus_level_fn=CorpusLevelCOMET(),  # batched, GPU: one predict() over the whole set
         higher_is_better=True,
     )
     copyright = SampleLevelMetricGrouping(
@@ -445,6 +455,13 @@ class Metrics(Enum):
         corpus_level_fn=MatthewsCorrCoef(),
         higher_is_better=True,
     )
+    metricx = CorpusLevelMetric(
+        metric_name="metricx",
+        sample_level_fn=MTSourcePreparator(),  # cheap: emit (source, gold, pred) per sample
+        category=SamplingMethod.GENERATIVE,
+        corpus_level_fn=CorpusLevelMetricX(),  # batched, GPU: score all samples in chunks
+        higher_is_better=False,
+    )
     mrr = SampleLevelMetric(
         metric_name="mrr",
         sample_level_fn=MRR(),
@@ -546,6 +563,20 @@ class Metrics(Enum):
     rougeLsum = SampleLevelMetric(
         metric_name="rougeLsum",
         sample_level_fn=ROUGE("rougeLsum"),
+        category=SamplingMethod.GENERATIVE,
+        corpus_level_fn=np.mean,
+        higher_is_better=True,
+    )
+    ruler_match_any = SampleLevelMetric(
+        metric_name="ruler_match",
+        sample_level_fn=RULER("any"),
+        category=SamplingMethod.GENERATIVE,
+        corpus_level_fn=np.mean,
+        higher_is_better=True,
+    )
+    ruler_match_all = SampleLevelMetric(
+        metric_name="ruler_match",
+        sample_level_fn=RULER("all"),
         category=SamplingMethod.GENERATIVE,
         corpus_level_fn=np.mean,
         higher_is_better=True,

@@ -75,9 +75,13 @@ class NLTKTokenizer(WordTokenizer):
     @property
     def tokenizer(self):
         if self._tokenizer is None:
+            import nltk
             from nltk import download, load
 
-            download("punkt_tab")
+            try:  # punkt_tab is preloaded in NLTK_DATA; only hit the network if genuinely missing
+                nltk.data.find("tokenizers/punkt_tab")  # (an unconditional download() hangs ~30min on
+            except LookupError:  # offline compute nodes, which have no network access).
+                download("punkt_tab")
             self._tokenizer = load(f"tokenizers/punkt/{self.punkt_language}.pickle")
         return self._tokenizer
 

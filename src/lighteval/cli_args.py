@@ -110,7 +110,7 @@ reasoning_tags = Arg(
             rich_help_panel=HELP_PANEL_NAME_1,
         ),
     ],
-    default="[('<think>', '</think>')]",
+    default="[('<think>', '</think>'), ('[THINK]', '[/THINK]')]",
 )
 
 load_tasks_multilingual = Arg(

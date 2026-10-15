@@ -262,7 +262,7 @@ TASKS_TABLE = [
         few_shots_split="dev",
         few_shots_select=None,
         generation_size=300,
-        metrics=[Metrics.chrf_plus, Metrics.bleu, Metrics.bleu_1, Metrics.bleu_4],
+        metrics=[Metrics.chrf_plus, Metrics.bleu, Metrics.bleu_1, Metrics.bleu_4, Metrics.comet, Metrics.metricx],
         stop_sequence=["\n"],
         version=0,
     )

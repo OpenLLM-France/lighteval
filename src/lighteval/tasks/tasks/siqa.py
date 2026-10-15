@@ -60,6 +60,7 @@ siqa = LightevalTaskConfig(
     prompt_function=siqa_prompt,
     hf_repo="allenai/social_i_qa",
     hf_subset="default",
+    hf_revision="537a2ec8ec565adc0b70b70752893e59e024df26",
     hf_avail_splits=["train", "validation"],
     evaluation_splits=["validation"],
     few_shots_split=None,

@@ -298,6 +298,13 @@ class LightevalTask:
         assert self.dataset is not None, f"Dataset {self.dataset_path} not found."
 
         docs = []
+        # doc.id must be unique ACROSS splits: `ix` (enumerate) resets to 0 on each split, so a task with
+        # several evaluation_splits (e.g. aime25 with aime_2025_I + aime_2025_II) would assign the same
+        # ids 0..N in both splits. Colliding ids make the prediction cache's `.loc[doc.id]` return >1 row,
+        # which then crashes (`ModelResponse(**...) got multiple values for keyword argument '<id>'`). A
+        # per-split offset keeps ids globally unique; for a single split the offset is 0, so ids are
+        # unchanged (existing single-split caches stay valid).
+        id_offset = 0
         for split in splits:
             for ix, item in enumerate(self.dataset[split]):
                 # Some tasks formatting is applied differently when the document is used for fewshot examples
@@ -311,7 +318,7 @@ class LightevalTask:
                 if doc is None or doc == []:
                     continue
 
-                doc.id = str(ix)
+                doc.id = str(id_offset + ix)
 
                 # Transfer task-level generation parameters to the document
                 doc.generation_grammar = self.generation_grammar
@@ -319,6 +326,7 @@ class LightevalTask:
                 doc.stop_sequences = self.stop_sequence
 
                 docs.append(doc)
+            id_offset += len(self.dataset[split])
 
         return docs
 
@@ -375,14 +383,12 @@ class LightevalTask:
         Returns:
             list[Doc]: List of documents ready for evaluation with few-shot examples
                 and generation parameters configured.
-
-        Raises:
-            ValueError: If no documents are available for evaluation.
         """
         eval_docs = self.eval_docs()
 
         if len(eval_docs) == 0:
-            raise ValueError(f"Task {self.name} has no documents to evaluate skipping.")
+            logger.warning(f"Task {self.name} has no documents to evaluate skipping.")
+            return None
 
         n_samples = min(max_samples, len(eval_docs)) if max_samples else len(eval_docs)
         rnd = random.Random()
@@ -454,12 +460,21 @@ class LightevalTask:
         Returns:
             DatasetDict: The loaded dataset dictionary containing all splits.
         """
-        dataset = load_dataset(
-            path=task.dataset_path,
-            name=task.dataset_config_name,
-            revision=task.dataset_revision,
-            data_files=task.data_files,
-        )
+        try:
+            dataset = load_dataset(
+                path=task.dataset_path,
+                name=task.dataset_config_name,
+                revision=task.dataset_revision,
+                data_files=task.data_files,
+            )
+        except ValueError:
+            # Fallback for datasets (e.g. MGSM) that expose configs as data_dir rather than name.
+            dataset = load_dataset(
+                path=task.dataset_path,
+                data_dir=task.dataset_config_name,
+                revision=task.dataset_revision,
+                data_files=task.data_files,
+            )
 
         if task.dataset_filter is not None:
             dataset = dataset.filter(task.dataset_filter)
