@@ -107,14 +107,23 @@ def batched(iterable, n):
 
 
 def uses_chat_template(
-    model_name: str = None, tokenizer: AutoTokenizer = None, override_chat_template: bool = None
+    model_name: str = None,
+    tokenizer: AutoTokenizer = None,
+    revision: str = None,
+    override_chat_template: bool = None,
 ) -> bool:
     """Returns a boolean depending on whether the Transformers AutoTokenizer contains
     a chat template or not
 
     Args:
         model_name (str, optional): Model name on HF.
-        tokenizer (AutoTokenizer, optional): The tokenizer to check.
+        tokenizer (AutoTokenizer, optional): The tokenizer to check. When provided, it is
+            inspected directly (preferred: it is guaranteed to match the revision actually
+            used for inference).
+        revision (str, optional): Model revision to load the tokenizer from when only
+            ``model_name`` is given. The tokenizer (and its chat template) can differ
+            between revisions, so this must match the revision used for inference; it also
+            matters offline, where only the evaluated revision may be present in the cache.
         override_chat_template (bool, optional): Override the chat template detection.
 
     Returns:
@@ -128,10 +137,10 @@ def uses_chat_template(
         if tokenizer:
             tk = tokenizer
         else:
-            tk = AutoTokenizer.from_pretrained(model_name)
+            tk = AutoTokenizer.from_pretrained(model_name, revision=revision)
         return tk.chat_template is not None
-    except Exception:
+    except Exception as e:
         logger.warning(
-            "We were not able to detect if the chat template should be used for your model: {e}. Assuming we're not using a chat template"
+            f"We were not able to detect if the chat template should be used for your model: {e}. Assuming we're not using a chat template"
         )
         return False

@@ -226,6 +226,7 @@ This fork is maintained by the [OpenLLM-France](https://github.com/OpenLLM-Franc
 ### Bug fixes
 - **Multiple-choice (MCQ) scoring on the Accelerate/Transformers backend**: fixed an incorrect 2-D slicing of the gathered continuation logits (and stray `-1` padding left in the continuations) that corrupted the log-likelihood comparison across choices.
 - Log-probability computation with recent vLLM (≥ 0.12), broken by prefix caching.
+- **Chat-template detection ignored the model revision**: `uses_chat_template` loaded the tokenizer from the default (`main`) revision instead of the evaluated one, so a non-`main` revision — and, offline, a cache holding only that revision — was mis-detected as having no chat template and the model silently ran in completion mode (generation never stopping). It now reuses the already-loaded tokenizer (Transformers/SGLang) or passes the revision (vLLM), and the warning reports the real error instead of a literal `{e}`.
 - Many other corner-case fixes: IFBench / IFEval-fr, MGSM / MMLU-Pro few-shot CoT, GPQA-fr dataset, stop-sequences, `squad_v2` unanswerable rows, nltk / transformers version robustness, offline judge, and more
 
 ### Packaging

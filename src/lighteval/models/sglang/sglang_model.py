@@ -153,13 +153,15 @@ class SGLangModel(LightevalModel):
     ):
         """Initializes an SGLang model."""
         self.config = config
-        self.use_chat_template = uses_chat_template(
-            model_name=self.config.model_name, override_chat_template=config.override_chat_template
-        )
         self.data_parallel_size = config.dp_size
         self.tensor_parallel_size = config.tp_size
         self._add_special_tokens = config.add_special_tokens
         self._tokenizer = self._create_auto_tokenizer(config)
+        # Inspect the tokenizer we actually loaded (rather than reloading by name), so chat-template
+        # detection matches the tokenizer used for inference.
+        self.use_chat_template = uses_chat_template(
+            tokenizer=self._tokenizer, override_chat_template=config.override_chat_template
+        )
         self._max_length = config.context_length if config.context_length is not None else None
         self.model = self._create_auto_model(config)
         self.model_name = _simplify_name(config.model_name)
