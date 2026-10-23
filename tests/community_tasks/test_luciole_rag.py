@@ -195,3 +195,41 @@ def test_answer_em_stays_fast_on_degenerate_markup_loops():
     start = time.perf_counter()
     assert luciole_rag.compute_answer_em(response, "4,001,000") == 1.0
     assert time.perf_counter() - start < 1.0
+
+
+def test_every_subset_has_a_source():
+    assert set(luciole_rag.DATASET_SUBSETS) == set(luciole_rag.DATASET_SOURCES)
+    tasks = {t.name: t for t in luciole_rag.TASKS_TABLE}
+    openrag = tasks["luciole_rag:openrag_bench"]
+    assert (openrag.hf_repo, openrag.hf_subset) == ("OpenLLM-France/OpenRAG-Bench", "luciole")
+    assert openrag.hf_revision
+
+
+def test_convert_openrag_row():
+    from community_tasks.convert_openrag_to_luciole import convert_row
+
+    def chunk(text, filename, role):
+        return {"text": text, "filename": filename, "role": role}
+
+    row = {
+        "id": "q1",
+        "question": "What was the revenue?",
+        "answer": "5",
+        "answerable": True,
+        "contexts": [
+            chunk("a", "report.pdf", "distractor"),
+            chunk("b", "report.pdf", "gold"),
+            chunk("c", "other.pdf", "gold_alternative"),
+            chunk("d", "report.pdf", "topic"),
+        ],
+    }
+    assert convert_row(row) == {
+        "id": "q1",
+        "query": "What was the revenue?",
+        "retrieved_documents": ["a", "b", "c", "d"],
+        "titles": ["report.pdf", "report.pdf [2]", "other.pdf", "report.pdf [3]"],
+        "supporting_index": [1, 2],
+        "answer": "5",
+    }
+    unanswerable = convert_row({**row, "answerable": False, "contexts": [chunk("a", "x.pdf", "distractor")]})
+    assert (unanswerable["supporting_index"], unanswerable["answer"]) == ([], "")

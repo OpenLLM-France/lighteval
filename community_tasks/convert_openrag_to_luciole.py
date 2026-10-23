@@ -20,11 +20,11 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
-"""Convert the openrag_bench dataset to the luciole_rag row schema.
+"""Convert OpenRAG Bench to the luciole_rag row schema.
 
-Reads ``openrag_bench`` (the ``reranked_gold.parquet`` export) and emits a
-HuggingFace-style dataset directory whose rows match what
-``community_tasks/luciole_rag.py`` expects:
+Reads a split of ``OpenLLM-France/OpenRAG-Bench`` (private: needs a Hugging
+Face token with access to the organization) and writes a parquet file whose
+rows match what ``community_tasks/luciole_rag.py`` expects:
 
 - ``id``: stable example identifier (kept as-is)
 - ``query``: user question (``question``)
@@ -39,21 +39,27 @@ HuggingFace-style dataset directory whose rows match what
 Usage::
 
     python community_tasks/convert_openrag_to_luciole.py \
-        [--input reranked_gold.parquet] [--output openrag_bench_luciole]
+        [--revision <commit>] [--split reranked_gold] [--output test.parquet]
 
-The output directory is a directory of parquet shards named ``test-*.parquet``,
-so ``datasets.load_dataset(path=<output>, name="default")`` returns a
-``DatasetDict`` with a single ``test`` split, which is what lighteval loads.
+``luciole_rag:openrag_bench`` reads the output of the ``reranked_gold`` split,
+published as ``luciole/test.parquet`` under the ``luciole`` config of
+OpenRAG-Bench itself, so it keeps the benchmark's licenses and visibility.
+``reranked_gold`` guarantees every evidence chunk a slot among the 10, so it
+measures the model alone; ``reranked`` also measures retrieval.
 """
 
 import argparse
-import os
 from collections import Counter
 
 import pandas as pd
 from datasets import Dataset
+from huggingface_hub import hf_hub_download
 
 
+SOURCE_REPO = "OpenLLM-France/OpenRAG-Bench"
+# Every evidence chunk, not only the minimal ``answer_positions``: luciole_rag
+# drops the supporting chunks to build synthetic unanswerables, and an evidence
+# chunk left behind would keep the question answerable.
 SUPPORTING_ROLES = {"gold", "gold_alternative", "gold_equivalent"}
 
 
@@ -92,24 +98,17 @@ def convert_row(row: dict) -> dict:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument(
-        "--input",
-        default=os.path.join(os.path.dirname(__file__), "reranked_gold.parquet"),
-        help="Path to the openrag_bench parquet export.",
-    )
-    parser.add_argument(
-        "--output",
-        default=os.path.join(os.path.dirname(__file__), "openrag_bench_luciole"),
-        help="Output directory for the converted dataset.",
-    )
+    parser.add_argument("--revision", default=None, help=f"Commit of {SOURCE_REPO} to convert (default: main).")
+    parser.add_argument("--split", default="reranked_gold", choices=["reranked_gold", "reranked"])
+    parser.add_argument("--output", default="test.parquet", help="Output parquet file.")
     args = parser.parse_args()
 
-    df = pd.read_parquet(args.input)
+    path = hf_hub_download(SOURCE_REPO, f"data/{args.split}.parquet", repo_type="dataset", revision=args.revision)
+    df = pd.read_parquet(path)
     rows = [convert_row(r) for r in df.to_dict(orient="records")]
 
-    dataset = Dataset.from_list(rows)
-    dataset.to_parquet(os.path.join(args.output, "test-00000-of-00001.parquet"))
-    print(f"Converted {len(rows)} rows -> {args.output}/test-00000-of-00001.parquet")
+    Dataset.from_list(rows).to_parquet(args.output)
+    print(f"Converted {len(rows)} rows of {SOURCE_REPO}:{args.split} -> {args.output}")
 
 
 if __name__ == "__main__":

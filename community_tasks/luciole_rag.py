@@ -22,8 +22,8 @@
 
 """RAG Luciole benchmark — citation-aware grounded QA evaluation.
 
-Reads rows from the HF dataset ``Mvanypersele/luciole_rag_benchmark`` and
-rebuilds the system prompt at evaluation time.
+Reads rows from Hugging Face datasets (see ``DATASET_SOURCES``) and rebuilds
+the system prompt at evaluation time.
 
 Row schema (one per example)
 ----------------------------
@@ -38,7 +38,12 @@ Row schema (one per example)
 Tasks
 -----
 One ``luciole_rag:<subset>`` task per subset (``hotpotqa``, ``hotpotqa_fr``,
-``tatqa``, ``piaf``, ``newsquadfr``, ``squad2_fr_pragnakalp``). A deterministic
+``hotpot_native_french``, ``tatqa``, ``piaf``, ``newsquadfr``,
+``squad2_fr_pragnakalp``, ``openrag_bench``). ``openrag_bench`` is the
+``reranked_gold`` split of OpenRAG Bench, read from the private ``luciole``
+config of ``OpenLLM-France/OpenRAG-Bench`` (needs a Hugging Face token with
+access to the organization); its 83 natural unanswerables come on top of the
+synthetic ones. A deterministic
 md5-based partition on the row id drops the supporting chunks on a fraction of
 the answerable rows, turning them into synthetic unanswerables. The fraction
 is set by ``LUCIOLE_RAG_DROP_RATIO`` (default 0.5). With ratio 0.0 the run
@@ -1198,7 +1203,25 @@ luciole_rag_refusal_judge = SampleLevelMetricGrouping(
 # ── task configs ───────────────────────────────────────────────────
 
 
-HF_REPO = os.getenv("LUCIOLE_RAG_HF_REPO", "Mvanypersele/luciole_rag_benchmark")
+_ORG_REPO = "OpenLLM-France/Luciole_RAG_unformatted"
+_PERSONAL_REPO = "Mvanypersele/luciole_RAG"
+# Where each subset is published: (repo, config, revision). The subsets in
+# Luciole_RAG_unformatted are byte-identical copies of the personal repo's; the
+# others stay there, since newsquadfr (CC BY-NC-SA) cannot join that repo's
+# CC BY-SA license. openrag_bench mixes licenses, some non-commercial, so it
+# lives in the private OpenRAG-Bench repo, pinned to the commit that added it.
+DATASET_SOURCES = {
+    "hotpotqa": (_ORG_REPO, "hotpotqa", None),
+    "hotpotqa_fr": (_PERSONAL_REPO, "hotpotqa_fr", None),
+    "hotpot_native_french": (_PERSONAL_REPO, "hotpot_native_french", None),
+    "tatqa": (_ORG_REPO, "tatqa", None),
+    "piaf": (_PERSONAL_REPO, "piaf", None),
+    "newsquadfr": (_PERSONAL_REPO, "newsquadfr", None),
+    "squad2_fr_pragnakalp": (_PERSONAL_REPO, "squad2_fr_pragnakalp", None),
+    "openrag_bench": ("OpenLLM-France/OpenRAG-Bench", "luciole", "1ac3766a9f916cff04e4c739c070d06cb6b1e1eb"),
+}
+# Reads every subset but openrag_bench from one repo instead, e.g. a local copy.
+HF_REPO = os.getenv("LUCIOLE_RAG_HF_REPO")
 
 DATASET_SUBSETS = [
     "hotpotqa",
@@ -1208,6 +1231,7 @@ DATASET_SUBSETS = [
     "piaf",
     "newsquadfr",
     "squad2_fr_pragnakalp",
+    "openrag_bench",
 ]
 
 # Per-subset evaluation split. Defaults to "test" where available, falling
@@ -1220,6 +1244,7 @@ DATASET_EVAL_SPLITS = {
     "piaf": "test",
     "newsquadfr": "test",
     "squad2_fr_pragnakalp": "test",
+    "openrag_bench": "test",
 }
 
 DATASET_AVAIL_SPLITS = {
@@ -1230,6 +1255,7 @@ DATASET_AVAIL_SPLITS = {
     "piaf": ["train", "test"],
     "newsquadfr": ["train", "validation", "test"],
     "squad2_fr_pragnakalp": ["train", "test"],
+    "openrag_bench": ["test"],
 }
 
 # LLM-as-judge factual scoring is opt-in (adds one API call per answerable
@@ -1249,12 +1275,16 @@ GENERATION_SIZE = int(os.getenv("LUCIOLE_RAG_GENERATION_SIZE", "2048"))
 
 def _make_task(subset: str) -> LightevalTaskConfig:
     evaluation_split = DATASET_EVAL_SPLITS.get(subset, "test")
+    repo, config, revision = DATASET_SOURCES[subset]
+    if HF_REPO and subset != "openrag_bench":
+        repo, revision = HF_REPO, None
     return LightevalTaskConfig(
         name=f"luciole_rag:{subset}",
         prompt_function=luciole_rag_prompt,
         suite=["community"],
-        hf_repo=HF_REPO,
-        hf_subset=subset,
+        hf_repo=repo,
+        hf_subset=config,
+        hf_revision=revision,
         hf_avail_splits=DATASET_AVAIL_SPLITS.get(subset, ["train", "test"]),
         evaluation_splits=[evaluation_split],
         few_shots_split=None,
@@ -1266,36 +1296,4 @@ def _make_task(subset: str) -> LightevalTaskConfig:
     )
 
 
-# openrag_bench conversion: a single-subset dataset built from the
-# ``Mvanypersele/openrag_bench`` parquet export (see
-# ``convert_openrag_to_luciole.py``). Point ``LUCIOLE_RAG_OPENRAG_HF_REPO`` at
-# the converted dataset -- either the local directory produced by the
-# conversion script or an uploaded HF repo. Natural unanswerable rows
-# (``answerable == False``) have an empty ``supporting_index`` and empty
-# ``answer``; the md5 drop-ratio partition still applies on top of them, so set
-# ``LUCIOLE_RAG_DROP_RATIO=0`` to keep only the natural unanswerables.
-OPENRAG_HF_REPO = os.getenv(
-    "LUCIOLE_RAG_OPENRAG_HF_REPO",
-    os.path.join(os.path.dirname(__file__), "openrag_bench_luciole"),
-)
-
-
-def _make_openrag_task() -> LightevalTaskConfig:
-    return LightevalTaskConfig(
-        name="luciole_rag:openrag_bench",
-        prompt_function=luciole_rag_prompt,
-        suite=["community"],
-        hf_repo=OPENRAG_HF_REPO,
-        hf_subset="default",
-        hf_avail_splits=["test"],
-        evaluation_splits=["test"],
-        few_shots_split=None,
-        few_shots_select=None,
-        metrics=_RAG_METRICS,
-        generation_size=GENERATION_SIZE,
-        stop_sequence=[],
-        version=3,
-    )
-
-
-TASKS_TABLE = [_make_task(s) for s in DATASET_SUBSETS] + [_make_openrag_task()]
+TASKS_TABLE = [_make_task(s) for s in DATASET_SUBSETS]
