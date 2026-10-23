@@ -76,8 +76,11 @@ Protocol version
 Version 2 changes answer matching (markup removal, whole words, signed numeric
 values and explicit scales), scores missing expected citations as F1=0, removes
 ``distractor_citation_rate``, rejects invalid judge refusal flags, and grades
-the final answer rather than a reasoning trace. Scores are not directly
-comparable with version 1; rerun both models under the same protocol/settings.
+the final answer rather than a reasoning trace. Version 3 matches numeric
+golds regardless of sign and of a scale word following the number, and scores
+a refusal 1 in the factual judge when the judge leaves it off the scale.
+Scores are not directly comparable across versions; rerun both models under
+the same protocol/settings.
 Generation budget, drop ratio, judge model/backend and reasoning stripping
 must also be held fixed when comparing runs.
 
@@ -1259,7 +1262,7 @@ def _make_task(subset: str) -> LightevalTaskConfig:
         metrics=_RAG_METRICS,
         generation_size=GENERATION_SIZE,
         stop_sequence=[],
-        version=2,
+        version=3,
     )
 
 
@@ -1291,7 +1294,7 @@ def _make_openrag_task() -> LightevalTaskConfig:
         metrics=_RAG_METRICS,
         generation_size=GENERATION_SIZE,
         stop_sequence=[],
-        version=2,
+        version=3,
     )
 
 
