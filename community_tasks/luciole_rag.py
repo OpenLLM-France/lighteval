@@ -87,7 +87,10 @@ LLM-as-judge factual and refusal evaluation, opt-in via
 ``LUCIOLE_RAG_USE_JUDGE=1``. Backend is set by ``LUCIOLE_RAG_JUDGE_BACKEND``
 (default ``litellm``); for a custom OpenAI-compatible endpoint set
 ``LLM_API_URL``, ``OPENAI_API_KEY`` and ``LLM_MODEL`` (with the ``openai/``
-prefix).
+prefix). A judge that reasons before its JSON verdict needs a larger output
+budget than the defaults (512 tokens for the factual judge, 256 for the
+refusal judge), or the verdict is truncated and the row dropped as a parse
+failure: set ``LUCIOLE_RAG_JUDGE_MAX_TOKENS`` (e.g. 6000) for both judges.
 
 Compute nodes without outbound network (Jean Zay) need a local backend: set
 ``LUCIOLE_RAG_JUDGE_BACKEND=vllm`` (or ``transformers``) and point
@@ -891,6 +894,10 @@ _DEFAULT_JUDGE_URL = os.getenv("LLM_API_URL")
 _JUDGE_CONCURRENCY = int(os.getenv("LUCIOLE_RAG_JUDGE_CONCURRENCY", "5"))
 _JUDGE_BACKEND_OPTIONS = {"concurrent_requests": _JUDGE_CONCURRENCY}
 
+# Output budget for both judges; unset keeps each judge's own default. A judge
+# that reasons before its JSON needs several thousand tokens.
+_JUDGE_MAX_TOKENS = int(os.getenv("LUCIOLE_RAG_JUDGE_MAX_TOKENS") or 0) or None
+
 # "litellm" (default), "openai" and "tgi" call a remote endpoint. Where the
 # compute nodes have no outbound network, use "vllm" or "transformers": they
 # load the judge in-process, so point LLM_MODEL at local weights (or a cached
@@ -965,7 +972,7 @@ class LucioleRagFactualJudge(_OfflineCapableJudge):
             judge_backend=judge_backend,
             short_judge_name="factual_judge",
             url=url,
-            max_tokens=512,
+            max_tokens=_JUDGE_MAX_TOKENS or 512,
         )
 
     def compute(self, responses, docs, **kwargs):
@@ -1110,7 +1117,7 @@ class LucioleRagRefusalJudge(_OfflineCapableJudge):
             judge_backend=judge_backend,
             short_judge_name="refusal_judge",
             url=url,
-            max_tokens=256,
+            max_tokens=_JUDGE_MAX_TOKENS or 256,
         )
 
     def compute(self, responses, docs, **kwargs):
