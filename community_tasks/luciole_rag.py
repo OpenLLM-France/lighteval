@@ -372,10 +372,13 @@ def _values_close(a: float, b: float) -> bool:
 def compute_answer_em(response: str, gold_answer: str, *, language: str = "en") -> float:
     """1.0 when the response contains the gold answer, else 0.0.
 
-    Numeric golds match signed values with explicit scale words:
-    "5,000,000" matches "5 million", but "5" does not match "5000".
-    Implicit table units are not inferred. Language resolves ambiguous
-    separators such as "1,234" (1234 in EN, 1.234 in FR). Other golds
+    Numeric golds match by value: "5,000,000" matches "5 million", but "5"
+    does not match "5000". Signs are ignored, since tables put outflows and
+    liabilities in accounting parentheses ("(10.1)") that prose states as
+    positive amounts ("a liability of $10.1 million"). A number with a scale
+    word also matches without it, since table golds are in the table's
+    unstated unit: gold "10.1" (millions) matches "$10.1 million". Language
+    resolves ambiguous separators such as "1,234" (1234 in EN, 1.234 in FR). Other golds
     match when their normalized text appears in the normalized response as
     a whole-word sequence. Both avoid the bare substring test, which
     credited gold "no" inside "not"/"cannot" (so refusals scored on yes/no
@@ -389,9 +392,14 @@ def compute_answer_em(response: str, gold_answer: str, *, language: str = "en") 
     response = " ".join(_strip_markup(response).split())
     gold_value = _numeric_gold_value(gold_answer, language)
     if gold_value is not None:
-        values = [_number_value(m, language) for m in _NUMBER_RE.finditer(response)]
-        hit = any(v is not None and _values_close(v, gold_value) for v in values)
-        return 1.0 if hit else 0.0
+        for m in _NUMBER_RE.finditer(response):
+            value = _number_value(m, language)
+            if value is None:
+                continue
+            scale = _SCALE_WORDS.get((m["scale"] or "").lower(), 1.0)
+            if any(_values_close(abs(v), abs(gold_value)) for v in (value, value / scale)):
+                return 1.0
+        return 0.0
     norm_pred = normalize_answer(response)
     norm_gold = normalize_answer(gold_answer)
     if not norm_gold:
