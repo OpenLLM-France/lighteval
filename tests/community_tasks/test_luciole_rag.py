@@ -67,6 +67,20 @@ def test_factual_parser_keeps_false_refusal_populated():
     ) == {"score": 4, "refused": False}
 
 
+@pytest.mark.parametrize(
+    ("response", "expected"),
+    [
+        ('{"score": 0, "refused": true, "justification": "refused"}', {"score": 1, "refused": True}),
+        ('{"score": null, "refused": true}', {"score": 1, "refused": True}),
+        ('{"refused": true}', {"score": 1, "refused": True}),
+        ('{"score": 0, "refused": false}', None),
+        ('{"score": 6, "refused": false}', None),
+    ],
+)
+def test_factual_parser_keeps_refusals_scored_off_scale(response, expected):
+    assert luciole_rag.parse_factual_judge_response(response) == expected
+
+
 def test_false_refusal_and_refusal_recall_keep_false_as_zero():
     class FakeFactualJudge:
         def evaluate_answer_batch(self, **kwargs):

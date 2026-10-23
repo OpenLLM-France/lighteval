@@ -851,6 +851,8 @@ Your task is to rate the **factual correctness and faithfulness** of the respons
 - **4**: The answer is correct and supported by the context, with only minor imprecisions or omissions.
 - **5**: The answer is correct and complete, and every claim the response makes is supported by the context.
 
+A refusal scores **1**: the question is answerable, so declining to answer is a wrong answer.
+
 Also report whether the response is in fact a **REFUSAL / abstention** — the
 assistant declined to answer, or stated the information is not in the documents —
 instead of a genuine attempt to answer. This question IS answerable from the
@@ -886,10 +888,19 @@ def parse_factual_judge_response(text: str) -> dict | None:
         return None
     try:
         parsed = _extract_json(text)
-        score = int(parsed["score"])
-        if not (1 <= score <= 5):
-            raise ValueError(f"score must be between 1 and 5, got {score}")
-        return {"score": score, "refused": _parse_refused(parsed)}
+        refused = _parse_refused(parsed)
+        try:
+            score = int(parsed["score"])
+        except (KeyError, TypeError, ValueError):
+            score = None
+        if score is None or not 1 <= score <= 5:
+            if not refused:
+                raise ValueError(f"score must be between 1 and 5, got {parsed.get('score')!r}")
+            # Judges sometimes score a refusal 0 or null, off the scale. The
+            # question is answerable, so a refusal is a wrong answer: score it
+            # 1 rather than drop the row and lose the false refusal.
+            score = 1
+        return {"score": score, "refused": refused}
     except Exception as exc:
         _log_judge_parse_failure("Factual judge", text, exc)
     return None
