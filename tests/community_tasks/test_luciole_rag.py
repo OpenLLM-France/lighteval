@@ -197,6 +197,51 @@ def test_answer_em_stays_fast_on_degenerate_markup_loops():
     assert time.perf_counter() - start < 1.0
 
 
+def _rag_rows(*rows):
+    """Columns of rows given as ``(id, titles, documents, supporting_index, answer)``."""
+    keys = ("id", "titles", "retrieved_documents", "supporting_index", "answer")
+    return {key: [row[k] for row in rows] for k, key in enumerate(keys)}
+
+
+def _row(columns, i):
+    return {key: values[i] for key, values in columns.items()} | {"query": "Where was Ada Lovelace born?"}
+
+
+@pytest.fixture
+def drop_all(monkeypatch):
+    monkeypatch.setattr(luciole_rag, "DROP_RATIO", 1.0)
+    monkeypatch.setattr(luciole_rag, "SHUFFLE_CHUNKS", False)
+
+
+def test_dropped_supports_are_replaced_one_for_one(drop_all):
+    rows = _rag_rows(
+        ("q1", ["Ada Lovelace", "Byron", "Babbage"], ["Ada was born in London.", "b", "c"], [0], "London"),
+        ("q2", ["Ada Lovelace (play)", "Paris"], ["A play about Ada Lovelace's life.", "London is large."], [], ""),
+    )
+    doc = luciole_rag.luciole_rag_prompt(_row(rows, 0), backfill_pool=luciole_rag.BackfillPool(rows))
+    # The chunk about the play shares the question's words; the one stating
+    # the answer is rejected.
+    assert doc.specific["chunk_titles"] == ["Ada Lovelace (play)", "Byron", "Babbage"]
+    assert "born in London" not in doc.specific["context"]
+    assert doc.specific["is_unanswerable"]
+
+
+def test_dropped_supports_are_removed_without_a_pool(drop_all):
+    rows = _rag_rows(("q1", ["Ada Lovelace", "Byron"], ["Ada was born in London.", "b"], [0], "London"))
+    doc = luciole_rag.luciole_rag_prompt(_row(rows, 0))
+    assert doc.specific["chunk_titles"] == ["Byron"]
+
+
+def test_replacement_takes_over_a_positional_label(drop_all):
+    rows = _rag_rows(
+        ("q1", ["Table 1", "Paragraph 1"], ["| gold |", "text"], [0], "5"),
+        ("q2", ["Paragraph 1", "Table 1"], ["other text", "| other table |"], [], ""),
+    )
+    doc = luciole_rag.luciole_rag_prompt(_row(rows, 0), backfill_pool=luciole_rag.BackfillPool(rows))
+    assert doc.specific["chunk_titles"] == ["Table 1", "Paragraph 1"]
+    assert "| other table |" in doc.specific["context"]
+
+
 def test_every_subset_has_a_source():
     assert set(luciole_rag.DATASET_SUBSETS) == set(luciole_rag.DATASET_SOURCES)
     tasks = {t.name: t for t in luciole_rag.TASKS_TABLE}

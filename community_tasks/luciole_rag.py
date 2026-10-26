@@ -45,7 +45,10 @@ config of ``OpenLLM-France/OpenRAG-Bench`` (needs a Hugging Face token with
 access to the organization); its 83 natural unanswerables come on top of the
 synthetic ones. A deterministic
 md5-based partition on the row id drops the supporting chunks on a fraction of
-the answerable rows, turning them into synthetic unanswerables. The fraction
+the answerable rows, turning them into synthetic unanswerables. Each dropped
+chunk is replaced by a non-supporting chunk of another row of the same split,
+related to the question and of similar length, so that neither the chunk count
+nor the context length gives the synthetic unanswerables away. The fraction
 is set by ``LUCIOLE_RAG_DROP_RATIO`` (default 0.5). With ratio 0.0 the run
 is pure answerable; with 1.0 it is pure unanswerable. One run fills both the
 answer/citation metrics (on kept rows) and the refusal metrics (on dropped
@@ -83,7 +86,9 @@ values and explicit scales), scores missing expected citations as F1=0, removes
 ``distractor_citation_rate``, rejects invalid judge refusal flags, and grades
 the final answer rather than a reasoning trace. Version 3 matches numeric
 golds regardless of sign and of a scale word following the number, and scores
-a refusal 1 in the factual judge when the judge leaves it off the scale.
+a refusal 1 in the factual judge when the judge leaves it off the scale. It
+also replaces the supporting chunks dropped from synthetic unanswerables
+instead of only removing them.
 Scores are not directly comparable across versions; rerun both models under
 the same protocol/settings.
 Generation budget, drop ratio, judge model/backend and reasoning stripping
@@ -108,14 +113,19 @@ and judging the saved details off-cluster afterwards avoids the in-job judge
 entirely.
 """
 
+import collections
+import functools
 import hashlib
+import itertools
 import json
 import logging
+import math
 import os
 import random
 import re
 
 import numpy as np
+from datasets import load_dataset
 
 from lighteval.metrics.metrics_sample import JudgeLLM, SampleLevelComputation
 from lighteval.metrics.utils.llm_as_judge import JudgeLM
@@ -628,12 +638,117 @@ def _shuffle_deterministic(items: list, seed_key: str) -> list:
     return shuffled
 
 
-def luciole_rag_prompt(line, task_name: str | None = None) -> Doc:
+# Dropping the supporting chunks without replacing them made the synthetic
+# unanswerables shorter than the answerable rows: the chunk count alone told
+# them apart on 99.8% of hotpotqa rows (8 chunks vs 10) and on every piaf and
+# newsquadfr row, without reading a word. Each dropped chunk is therefore
+# replaced by a non-supporting chunk of another row of the same split. A random
+# one would be off topic where the native distractors were retrieved for the
+# question (on hotpotqa, the chunk sharing the fewest words with the question
+# then gave the row away 94% of the time), so the replacement is drawn from the
+# BACKFILL_CANDIDATES eligible chunks closest to the question, and among those
+# the one closest in length to the dropped chunk wins, so the context length
+# does not give the row away either.
+BACKFILL_CANDIDATES = 16
+
+# TAT-QA titles are positional labels, not names: a replacement takes over the
+# label of the chunk it replaces and must be of the same kind, so the row keeps
+# its number of tables and an unbroken numbering.
+_LABEL_TITLE_RE = re.compile(r"(Table|Paragraph) \d+")
+
+_WORD_RE = re.compile(r"\w{3,}")
+
+
+def _title_kind(title: str) -> str | None:
+    match = _LABEL_TITLE_RE.fullmatch(title)
+    return match.group(1) if match else None
+
+
+def _words(text: str) -> set[str]:
+    return {w.lower() for w in _WORD_RE.findall(text)}
+
+
+class BackfillPool:
+    """Non-supporting chunks of a split, indexed by word to rank them against a
+    question. ``rows`` are columns (a ``datasets.Dataset`` or a dict of lists).
+    """
+
+    # Words found in more chunks than this share say nothing about the topic.
+    MAX_DOCUMENT_FREQUENCY = 0.02
+
+    def __init__(self, rows):
+        self.chunks: list[tuple[str, str, str]] = []
+        postings: dict[str, list[int]] = collections.defaultdict(list)
+        for row_id, titles, documents, support in zip(
+            rows["id"], rows["titles"], rows["retrieved_documents"], rows["supporting_index"]
+        ):
+            support_set = {int(i) for i in support or []}
+            for i, (title, document) in enumerate(zip(titles, documents)):
+                if i in support_set:
+                    continue
+                for word in _words(f"{title} {document}"):
+                    postings[word].append(len(self.chunks))
+                self.chunks.append((str(row_id), str(title), str(document)))
+        cap = max(1, int(self.MAX_DOCUMENT_FREQUENCY * len(self.chunks)))
+        self._postings = {word: ids for word, ids in postings.items() if len(ids) <= cap}
+
+    def related(self, query: str) -> list[int]:
+        """Indices of the chunks sharing a word with ``query``, by decreasing
+        idf-weighted overlap.
+        """
+        scores: dict[int, float] = collections.defaultdict(float)
+        for word in _words(query):
+            ids = self._postings.get(word, [])
+            for i in ids:
+                scores[i] += math.log(len(self.chunks) / len(ids))
+        return sorted(scores, key=lambda i: (-scores[i], i))
+
+
+def _select_backfill(
+    title: str,
+    document: str,
+    *,
+    row_id: str,
+    query: str,
+    present_titles: set[str],
+    present_documents: set[str],
+    answer: str,
+    language: str,
+    pool: BackfillPool,
+    rng: random.Random,
+) -> tuple[str, str] | None:
+    """Replacement ``(title, document)`` for a dropped supporting chunk, or
+    None when the pool holds no eligible chunk. Chunks unrelated to the query
+    are drawn at random once the related ones run out.
+    """
+    kind = _title_kind(title)
+    random_draws = (rng.randrange(len(pool.chunks)) for _ in range(BACKFILL_CANDIDATES * 50))
+    eligible = []
+    for i in itertools.chain(pool.related(query), random_draws):
+        if len(eligible) == BACKFILL_CANDIDATES:
+            break
+        source_id, candidate_title, candidate = pool.chunks[i]
+        if source_id == row_id or candidate in present_documents or _title_kind(candidate_title) != kind:
+            continue
+        if kind is None and candidate_title in present_titles:
+            continue
+        # A chunk stating the answer would make the row answerable again.
+        if answer and compute_answer_em(candidate, answer, language=language):
+            continue
+        eligible.append((title if kind else candidate_title, candidate))
+    if not eligible:
+        return None
+    return min(eligible, key=lambda chunk: abs(len(chunk[1]) - len(document)))
+
+
+def luciole_rag_prompt(line, task_name: str | None = None, backfill_pool: BackfillPool | None = None) -> Doc:
     """Convert one prompt-agnostic row into a lighteval Doc.
 
     A deterministic md5-based bucket on the row id decides whether to drop
     the supporting chunks (``bucket < DROP_RATIO``). The decision is
     independent of task name and stable across runs at the same ratio.
+    Dropped chunks are replaced one-for-one from ``backfill_pool`` (see
+    ``_select_backfill``); without a pool they are only removed.
 
     When ``SHUFFLE_CHUNKS`` is set, the kept chunks are presented in a
     per-id deterministic shuffled order to remove position bias.
@@ -653,28 +768,53 @@ def luciole_rag_prompt(line, task_name: str | None = None) -> Doc:
 
     drop_supports = _hash_unit(str(row_id)) < DROP_RATIO
     support_set = {i for i in supporting_index if 0 <= i < len(titles)}
+    language = detect_language(query)
+    titles = [str(t) for t in titles]
+    retrieved = [str(d) for d in retrieved]
 
     if drop_supports:
         kept = [i for i in range(len(retrieved)) if i not in support_set]
+        if backfill_pool is not None and backfill_pool.chunks:
+            rng = random.Random(f"backfill:{row_id}")
+            present_titles, present_documents = set(titles), set(retrieved)
+            for i in sorted(support_set):
+                replacement = _select_backfill(
+                    titles[i],
+                    retrieved[i],
+                    row_id=str(row_id),
+                    query=query,
+                    present_titles=present_titles,
+                    present_documents=present_documents,
+                    answer=answer,
+                    language=language,
+                    pool=backfill_pool,
+                    rng=rng,
+                )
+                if replacement is None:
+                    continue
+                titles[i], retrieved[i] = replacement
+                present_titles.add(titles[i])
+                present_documents.add(retrieved[i])
+                kept.append(i)
+            kept.sort()
     else:
         kept = list(range(len(retrieved)))
 
     if SHUFFLE_CHUNKS:
         kept = _shuffle_deterministic(kept, str(row_id))
 
-    kept_titles = [str(titles[i]) for i in kept]
-    kept_documents = [str(retrieved[i]) for i in kept]
+    kept_titles = [titles[i] for i in kept]
+    kept_documents = [retrieved[i] for i in kept]
 
     if drop_supports:
         effective_gold_titles: list[str] = []
         is_unanswerable = True
         reference_answer = ""
     else:
-        effective_gold_titles = [str(titles[i]) for i in support_set]
+        effective_gold_titles = [titles[i] for i in support_set]
         is_unanswerable = len(support_set) == 0
         reference_answer = answer
 
-    language = detect_language(query)
     template = SYSTEM_PROMPTS.get(language, SYSTEM_PROMPT_EN)
     context = build_context(kept_titles, kept_documents)
     system_content = template.format(
@@ -1273,14 +1413,38 @@ if _USE_JUDGE:
 GENERATION_SIZE = int(os.getenv("LUCIOLE_RAG_GENERATION_SIZE", "2048"))
 
 
-def _make_task(subset: str) -> LightevalTaskConfig:
-    evaluation_split = DATASET_EVAL_SPLITS.get(subset, "test")
+def _dataset_source(subset: str) -> tuple[str, str, str | None]:
     repo, config, revision = DATASET_SOURCES[subset]
     if HF_REPO and subset != "openrag_bench":
         repo, revision = HF_REPO, None
+    return repo, config, revision
+
+
+@functools.cache
+def _backfill_pool(subset: str) -> BackfillPool:
+    """Non-supporting chunks of the subset's evaluation split. The prompt
+    function only sees one row, so the split is read again (from the cache
+    lighteval just filled).
+    """
+    repo, config, revision = _dataset_source(subset)
+    rows = load_dataset(repo, config, revision=revision, split=DATASET_EVAL_SPLITS.get(subset, "test"))
+    return BackfillPool(rows)
+
+
+def _subset_prompt(subset: str):
+    def prompt(line, task_name: str | None = None) -> Doc:
+        pool = _backfill_pool(subset) if DROP_RATIO > 0 else None
+        return luciole_rag_prompt(line, task_name, backfill_pool=pool)
+
+    return prompt
+
+
+def _make_task(subset: str) -> LightevalTaskConfig:
+    evaluation_split = DATASET_EVAL_SPLITS.get(subset, "test")
+    repo, config, revision = _dataset_source(subset)
     return LightevalTaskConfig(
         name=f"luciole_rag:{subset}",
-        prompt_function=luciole_rag_prompt,
+        prompt_function=_subset_prompt(subset),
         suite=["community"],
         hf_repo=repo,
         hf_subset=config,
