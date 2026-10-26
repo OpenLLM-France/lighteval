@@ -147,23 +147,46 @@ class PromptManager:
             # If instruction is provided, prepend it to the main query
             main_query = doc.instruction + main_query
 
+        # Optional assistant-turn prefill (e.g. RULER's answer prefix). For local
+        # chat models it is appended *after* the generation prompt so the model
+        # continues the answer instead of opening a fresh assistant turn. API
+        # backends cannot take a raw prefill, so it stays at the end of the user
+        # turn (unchanged behaviour); non-chat models are handled in
+        # _prepare_plain_text. Only set by tasks that opt in via Doc.specific.
+        assistant_prefix = (doc.specific or {}).get("assistant_prefix")
+
+        if not tokenize and assistant_prefix is not None:
+            main_query = f"{main_query} {assistant_prefix}"
+
         messages.append({"role": "user", "content": main_query})
 
         if tokenize:  # for local models
-            assert self.tokenizer is not None, "Tokenizer must be set for chat template formatting."
-
-            kwargs = {}
-            if self.enable_thinking is not None:
-                kwargs["enable_thinking"] = self.enable_thinking
-            return self.tokenizer.apply_chat_template(
-                messages,
-                tokenize=False,
-                add_generation_prompt=True,
-                **kwargs,
-            )
+            return self._render_chat_template(messages, assistant_prefix)
 
         else:  # for apis
             return messages
+
+    def _render_chat_template(self, messages, assistant_prefix: str | None = None) -> str:
+        """Tokenizer-render chat ``messages`` to a string, opening the assistant turn.
+
+        When ``assistant_prefix`` is set it is appended after the generation prompt as
+        an assistant-turn prefill, so the model continues from it (used by RULER to
+        match the reference setup).
+        """
+        assert self.tokenizer is not None, "Tokenizer must be set for chat template formatting."
+
+        kwargs = {}
+        if self.enable_thinking is not None:
+            kwargs["enable_thinking"] = self.enable_thinking
+        rendered = self.tokenizer.apply_chat_template(
+            messages,
+            tokenize=False,
+            add_generation_prompt=True,
+            **kwargs,
+        )
+        if assistant_prefix is not None:
+            rendered = rendered + assistant_prefix
+        return rendered
 
     def _prepare_plain_text(self, doc: Doc) -> str:
         """Prepare prompt using plain text format.
@@ -189,7 +212,16 @@ class PromptManager:
         query = self._extract_query(doc.query, doc.instruction)
         parts.append(query)
 
-        return "\n\n".join(parts)
+        prompt = "\n\n".join(parts)
+
+        # Optional continuation prefill (e.g. RULER's answer prefix): a completion
+        # model continues straight from it. Appended exactly as the task's prompt
+        # function used to do, so non-chat-template models are unaffected.
+        assistant_prefix = (doc.specific or {}).get("assistant_prefix")
+        if assistant_prefix is not None:
+            prompt = f"{prompt} {assistant_prefix}"
+
+        return prompt
 
     def _extract_query(self, query: str, instruction: str | None) -> str:
         """Extract query content, removing instruction prefix if appropriate.
