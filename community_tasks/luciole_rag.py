@@ -56,16 +56,17 @@ rows).
 
 Prompt
 ------
-Built per row with a single citation rule (each quoted excerpt is wrapped
-inline in ``<ref name="title">...</ref>``, where ``title`` matches the
-``[title]`` header of the cited chunk in the context) and a single refusal
-rule that instructs the model to reply with one **canonical refusal phrase**
-verbatim. Detection of refusal is lenient: it matches the shorter invariant
-core of the canonical phrase (e.g. ``do not allow me to answer`` / ``ne
-permettent pas de répondre``), so common paraphrases of the prefix ("The
-provided context...", "The available/retrieved documents...") still count
-as refusals. The prompt language (FR/EN) is detected per row from the
-query.
+Built per row in the format of the ``Mvanypersele/luciole_RAG_formated``
+training data: chunks are numbered ``[N] filename: title`` and delimited by
+``[CHUNK_START]``/``[CHUNK_END]``, with a single citation rule (each quoted
+excerpt is wrapped inline in ``<ref id="N">...</ref>``, copied verbatim from
+chunk ``N``) and a single refusal rule that instructs the model to reply with
+one **canonical refusal phrase** verbatim. Detection of refusal is lenient:
+it matches the shorter invariant core of the canonical phrase (e.g. ``do not
+allow me to answer`` / ``ne permettent pas de répondre``), so common
+paraphrases of the prefix ("The provided context...", "The available/retrieved
+documents...") still count as refusals. The prompt language (FR/EN) is
+detected per row from the query.
 
 Refusal metrics
 ---------------
@@ -75,6 +76,14 @@ refusing in wording the patterns do not cover scores 0 there.
 ``refusal_judge_recall`` answers the behavioural question and needs the judge;
 on Luciole-1B the two differ by ~30 points, so a low pattern score means
 "off-pattern", not "does not refuse".
+
+Citation metrics
+----------------
+Citations are scored on chunk numbers against the supporting chunks, so
+duplicate titles and positional TAT-QA labels ("Paragraph 3") stay
+unambiguous. ``citation_*_fuzzy`` credits a cited number alone;
+``citation_*_strict`` also requires every excerpt quoted under that number to
+appear verbatim in the chunk (case, spacing and ``...`` elisions aside).
 
 Responses are stripped of ``<think>`` reasoning traces before scoring; see
 ``strip_reasoning``.
@@ -88,7 +97,9 @@ the final answer rather than a reasoning trace. Version 3 matches numeric
 golds regardless of sign and of a scale word following the number, and scores
 a refusal 1 in the factual judge when the judge leaves it off the scale. It
 also replaces the supporting chunks dropped from synthetic unanswerables
-instead of only removing them.
+instead of only removing them, and numbers the chunks so that citations name a
+chunk number (``<ref id="N">``) rather than a title, with strict citation
+metrics checking the quoted excerpt.
 Scores are not directly comparable across versions; rerun both models under
 the same protocol/settings.
 Generation budget, drop ratio, judge model/backend and reasoning stripping
@@ -141,21 +152,22 @@ logger = logging.getLogger(__name__)
 
 # ── citation extraction regex ──────────────────────────────────────
 
-# The prompt instructs a single citation syntax: ``<ref name="title">...</ref>``.
+# The prompt instructs a single citation syntax: ``<ref id="N">...</ref>``.
 # Any other syntax in the model output is treated as a failure to follow the
-# citation instruction (lower precision/recall). The ``name`` attribute may
-# use single or double quotes.
+# citation instruction (lower precision/recall). The ``id`` value may be
+# unquoted or use single or double quotes.
 _CITATION_TAG_RE = re.compile(
-    r'<ref\s+name\s*=\s*["\']([^"\']+)["\']\s*>',
+    r'<ref\s+id\s*=\s*["\']?\s*(\d+)\s*["\']?\s*>',
     re.IGNORECASE,
 )
+_CITATION_CLOSE_RE = re.compile(r"</ref\s*>", re.IGNORECASE)
 
 # Any opening, closing or self-closing tag, attributes included: the
 # instructed <ref>, but also the <quote>, <answer> or <span> wrappers models
 # put around a value. Answer matching replaces these with a space:
 # normalization drops punctuation without inserting one, so an inline tag
 # would otherwise glue its name onto the adjacent answer word
-# ("delivery<ref name="source_1">" -> "deliveryref namesource_1"). A tag
+# ("delivery<ref id="1">" -> "deliveryref id1"). A tag
 # must start with a letter right after "<", so comparisons like "< 5" stay.
 _MARKUP_TAG_RE = re.compile(r"</?[A-Za-z][\w-]*(?:\s[^<>]*)?/?>")
 
@@ -248,60 +260,65 @@ def detect_refusal(response: str) -> bool:
     return any(p in norm for p in _NORMALIZED_REFUSAL_PHRASES)
 
 
-def extract_cited_titles(response: str) -> list[str]:
-    """Extract titles from ``<ref name="title">...</ref>`` tags only.
+def extract_citations(response: str) -> list[tuple[int, str | None]]:
+    """Extract ``(chunk number, excerpt)`` from ``<ref id="N">...</ref>`` tags
+    only, in order. The excerpt is None when the tag is never closed, or is
+    closed after the next ``<ref id>`` opens.
 
     Other citation syntaxes are intentionally not parsed: the prompt
     instructs this exact form, so unparsed citations count as
     instruction-following failures (lower precision/recall).
     """
-    seen: set[str] = set()
-    unique: list[str] = []
-    for m in _CITATION_TAG_RE.finditer(response):
-        title = m.group(1).strip()
-        norm = title.lower()
-        if norm and norm not in seen:
-            seen.add(norm)
-            unique.append(title)
-    return unique
+    tags = list(_CITATION_TAG_RE.finditer(response))
+    citations = []
+    for i, tag in enumerate(tags):
+        end = tags[i + 1].start() if i + 1 < len(tags) else len(response)
+        close = _CITATION_CLOSE_RE.search(response, tag.end(), end)
+        citations.append((int(tag.group(1)), response[tag.end() : close.start()] if close else None))
+    return citations
 
 
-def _citation_key(title: str) -> str:
-    title = re.sub(r"\s*\[[0-9a-f]{8,}\]\s*$", "", title.strip(), flags=re.IGNORECASE)
-    return title.lower()
+# Elisions models put inside a quote: each piece around one must be verbatim.
+_ELISION_RE = re.compile(r"\[\s*(?:\.\.\.|…)\s*\]|\(\s*(?:\.\.\.|…)\s*\)|\.\.\.|…")
+_EDGE_QUOTES = " \t\n\"'«»“”‘’"
 
 
-def _citation_match(a: str, b: str) -> bool:
-    return _citation_key(a) == _citation_key(b)
+def _normalize_quote(text: str) -> str:
+    return _normalize_spaces(text.replace("’", "'").replace("‘", "'").replace("\u00a0", " "))
 
 
-def _citation_fuzzy_match(a: str, b: str) -> bool:
-    a_key = _citation_key(a)
-    b_key = _citation_key(b)
-    return bool(a_key and b_key and (a_key == b_key or a_key in b_key or b_key in a_key))
+def excerpt_is_verbatim(excerpt: str | None, chunk: str) -> bool:
+    """Whether ``excerpt`` is copied from ``chunk``, ignoring case, spacing,
+    surrounding quotes and ``...`` elisions.
+    """
+    if excerpt is None:
+        return False
+    pieces = [_normalize_quote(p.strip(_EDGE_QUOTES)) for p in _ELISION_RE.split(excerpt)]
+    pieces = [p for p in pieces if p]
+    source = _normalize_quote(chunk)
+    return bool(pieces) and all(p in source for p in pieces)
 
 
 def evaluate_citations(
-    cited: list[str],
-    expected: list[str],
+    cited: list[int],
+    expected: list[int],
     *,
-    fuzzy: bool = False,
+    misquoted: set[int] = frozenset(),
 ) -> tuple[float | None, float | None, float | None]:
-    """Citation precision/recall/F1 after citation-key normalization.
+    """Citation precision/recall/F1 over distinct chunk numbers. A
+    ``misquoted`` number still counts as cited but never as correct.
 
     Citing nothing when sources were expected gives recall 0 and F1 0;
     precision stays None there, since it is undefined without citations.
     """
-    cited_dedup = list(dict.fromkeys(t.strip() for t in cited if _citation_key(t)))
-    expected_dedup = list(dict.fromkeys(t.strip() for t in expected if _citation_key(t)))
+    cited_dedup = set(cited)
+    expected_dedup = set(expected)
     if not cited_dedup and not expected_dedup:
         return None, None, None
 
-    match = _citation_fuzzy_match if fuzzy else _citation_match
-    correct_cited = sum(1 for c in cited_dedup if any(match(c, g) for g in expected_dedup))
-    matched_gold = sum(1 for g in expected_dedup if any(match(c, g) for c in cited_dedup))
-    precision = correct_cited / len(cited_dedup) if cited_dedup else None
-    recall = matched_gold / len(expected_dedup) if expected_dedup else None
+    correct = len((cited_dedup & expected_dedup) - misquoted)
+    precision = correct / len(cited_dedup) if cited_dedup else None
+    recall = correct / len(expected_dedup) if expected_dedup else None
     f1 = None
     if precision is not None and recall is not None:
         f1 = 0.0 if (precision + recall) == 0 else 2 * precision * recall / (precision + recall)
@@ -501,18 +518,18 @@ def _parse_refused(parsed: dict) -> bool:
 
 # ── prompt-building primitives ─────────────────────────────────────
 
-_REF_TEMPLATE = '<ref name="{title}">{excerpt}</ref>'
-
+# Wording of the Mvanypersele/luciole_RAG_formated training data, so that
+# models fine-tuned on it are evaluated on the prompt they were trained on.
 CITATION_INSTRUCTION = {
     "en": (
-        "When quoting from the context, wrap each excerpt inline with "
-        f"`{_REF_TEMPLATE.replace('{title}', 'source title').replace('{excerpt}', 'excerpt')}`, "
-        "where `source title` matches the `[title]` header of the cited chunk in the context. "
+        'When quoting from the context, wrap each excerpt inline with `<ref id="N">excerpt</ref>`, '
+        "where `N` is the number of the cited document (the `[N]` before its filename) "
+        "and `excerpt` is copied verbatim from that document."
     ),
     "fr": (
-        "Lorsque vous citez le contexte, encadrez chaque extrait en ligne avec "
-        f"`{_REF_TEMPLATE.replace('{title}', 'titre de la source').replace('{excerpt}', 'extrait')}`, "
-        "où `titre de la source` correspond à l'en-tête `[titre]` du document cité dans le contexte. "
+        'Lorsque vous citez le contexte, encadrez chaque extrait en ligne avec `<ref id="N">extrait</ref>`, '
+        "où `N` est le numéro du document cité (le `[N]` devant son nom de fichier) "
+        "et `extrait` est recopié mot pour mot depuis ce document."
     ),
 }
 
@@ -594,13 +611,16 @@ def detect_language(text: str) -> str:
 # ── context formatting ────────────────────────────────────────────
 
 
-def _format_chunk(title: str, document: str) -> str:
-    """Emit a chunk as ``[title]\\ncontent``."""
-    return f"[{title}]\n{document}"
+def _format_chunk(number: int, title: str, document: str) -> str:
+    """Emit a chunk as ``[N] filename: title`` followed by its delimited content."""
+    return f"[{number}] filename: {title}\n\n[CHUNK_START]\n{document}\n[CHUNK_END]"
 
 
 def build_context(titles: list[str], documents: list[str]) -> str:
-    return "\n\n".join(_format_chunk(str(t), str(d)) for t, d in zip(titles, documents))
+    """Number the chunks from 1 in the order given: ``<ref id="N">`` cites chunk N."""
+    return "\n----------\n\n".join(
+        _format_chunk(n, str(t), str(d)) for n, (t, d) in enumerate(zip(titles, documents), start=1)
+    )
 
 
 # ── prompt function ────────────────────────────────────────────────
@@ -808,10 +828,12 @@ def luciole_rag_prompt(line, task_name: str | None = None, backfill_pool: Backfi
 
     if drop_supports:
         effective_gold_titles: list[str] = []
+        gold_chunk_ids: list[int] = []
         is_unanswerable = True
         reference_answer = ""
     else:
         effective_gold_titles = [titles[i] for i in support_set]
+        gold_chunk_ids = sorted(n for n, i in enumerate(kept, start=1) if i in support_set)
         is_unanswerable = len(support_set) == 0
         reference_answer = answer
 
@@ -832,7 +854,9 @@ def luciole_rag_prompt(line, task_name: str | None = None, backfill_pool: Backfi
         specific={
             "context": context,
             "chunk_titles": kept_titles,
+            "chunk_documents": kept_documents,
             "supporting_facts_titles": effective_gold_titles,
+            "supporting_chunk_ids": gold_chunk_ids,
             "is_unanswerable": is_unanswerable,
             "reference_answer": reference_answer,
             "instruction_as_system": True,
@@ -912,7 +936,8 @@ class LucioleRagSampleMetrics(SampleLevelComputation):
 
     def compute(self, model_response, doc, **kwargs):
         spec = doc.specific or {}
-        gold_titles = spec.get("supporting_facts_titles", []) or []
+        gold_ids = [int(n) for n in spec.get("supporting_chunk_ids", []) or []]
+        chunks = list(spec.get("chunk_documents", []) or [])
         is_unanswerable = bool(spec.get("is_unanswerable", False))
         reference_answer = spec.get("reference_answer", "") or ""
 
@@ -934,12 +959,20 @@ class LucioleRagSampleMetrics(SampleLevelComputation):
                 "false_refusal_format_rate": None,
             }
 
-        cited = extract_cited_titles(response_text)
+        citations = extract_citations(response_text)
+        cited = [n for n, _ in citations]
+        # Strict metrics give no credit for a number quoted even once off the
+        # text of its chunk.
+        misquoted = {
+            n
+            for n, excerpt in citations
+            if not 1 <= n <= len(chunks) or not excerpt_is_verbatim(excerpt, chunks[n - 1])
+        }
 
         answer_em = compute_answer_em(response_text, reference_answer, language=spec.get("language", "en"))
         answer_em_fuzzy = compute_answer_em_fuzzy(response_text, reference_answer)
-        precision_strict, recall_strict, citation_f1_strict = evaluate_citations(cited, gold_titles)
-        precision_fuzzy, recall_fuzzy, citation_f1_fuzzy = evaluate_citations(cited, gold_titles, fuzzy=True)
+        precision_strict, recall_strict, citation_f1_strict = evaluate_citations(cited, gold_ids, misquoted=misquoted)
+        precision_fuzzy, recall_fuzzy, citation_f1_fuzzy = evaluate_citations(cited, gold_ids)
 
         return {
             "answer_em": answer_em,

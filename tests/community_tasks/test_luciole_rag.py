@@ -123,7 +123,7 @@ def test_false_refusal_and_refusal_recall_keep_false_as_zero():
         ("Revenue rose from 80 million to 85 million.", "5", 0.0),
         ("No, they were not.", "no", 1.0),
         ("Net sales were <quote>157,133</quote>.", "157,133", 1.0),
-        ('Paid when amounts fall due<ref name="source_1">quote</ref>.', "when amounts fall due", 1.0),
+        ('Paid when amounts fall due<ref id="1">quote</ref>.', "when amounts fall due", 1.0),
         ("Accrued revenue was $5,824,000.", "5,824", 0.0),
         ("The grant was 5 million dollars.", "5,000,000", 1.0),
         ("The adjustment was $500,000.", "$0.5 million", 1.0),
@@ -184,8 +184,57 @@ def test_sample_metrics_use_document_language_for_numbers():
 
 
 def test_citation_f1_is_zero_when_expected_sources_are_not_cited():
-    assert luciole_rag.evaluate_citations([], ["source"]) == (None, 0.0, 0.0)
+    assert luciole_rag.evaluate_citations([], [1]) == (None, 0.0, 0.0)
     assert luciole_rag.evaluate_citations([], []) == (None, None, None)
+
+
+def test_extract_citations_reads_numbers_and_excerpts():
+    response = "A <ref id=\"2\">first</ref> B <ref id='5'>second</REF> C <ref id=7>never closed"
+    assert luciole_rag.extract_citations(response) == [(2, "first"), (5, "second"), (7, None)]
+
+
+@pytest.mark.parametrize(
+    ("excerpt", "expected"),
+    [
+        ("Cyanide Studio est un studio  français", True),
+        ("« cyanide studio est un studio français »", True),
+        ("fondé en 2000 ... basé à Nanterre", True),
+        ("Cyanide Studio a été fondé en 2000", False),
+        ("", False),
+        (None, False),
+    ],
+)
+def test_excerpt_is_verbatim(excerpt, expected):
+    chunk = "Cyanide Studio est un studio français de développement fondé en 2000 et basé à Nanterre."
+    assert luciole_rag.excerpt_is_verbatim(excerpt, chunk) == expected
+
+
+def test_context_numbers_chunks_in_presentation_order(monkeypatch):
+    monkeypatch.setattr(luciole_rag, "DROP_RATIO", 0.0)
+    monkeypatch.setattr(luciole_rag, "SHUFFLE_CHUNKS", False)
+    rows = _rag_rows(("q1", ["Byron", "Ada Lovelace"], ["b", "Ada was born in London."], [1], "London"))
+    doc = luciole_rag.luciole_rag_prompt(_row(rows, 0))
+    assert doc.specific["context"] == (
+        "[1] filename: Byron\n\n[CHUNK_START]\nb\n[CHUNK_END]\n----------\n\n"
+        "[2] filename: Ada Lovelace\n\n[CHUNK_START]\nAda was born in London.\n[CHUNK_END]"
+    )
+    assert doc.specific["supporting_chunk_ids"] == [2]
+
+
+def test_strict_citations_require_a_verbatim_excerpt():
+    doc = SimpleNamespace(
+        specific={
+            "reference_answer": "London",
+            "chunk_documents": ["b", "Ada was born in London."],
+            "supporting_chunk_ids": [2],
+        }
+    )
+    metrics = luciole_rag.LucioleRagSampleMetrics()
+    exact = metrics.compute(SimpleNamespace(final_text=['London <ref id="2">born in London</ref>']), doc)
+    assert exact["citation_f1_strict"] == exact["citation_f1_fuzzy"] == 1.0
+    paraphrase = metrics.compute(SimpleNamespace(final_text=['London <ref id="2">Ada is from London</ref>']), doc)
+    assert paraphrase["citation_f1_fuzzy"] == 1.0
+    assert paraphrase["citation_precision_strict"] == paraphrase["citation_recall_strict"] == 0.0
 
 
 def test_answer_em_stays_fast_on_degenerate_markup_loops():
