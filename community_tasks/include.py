@@ -53,9 +53,10 @@ Best of both, with two fixes:
   * OpenLLM's version passed `Language.FRENCH` for every language (wrong translation literals in the
     MCF/Hybrid templates); here each config uses its own `Language`.
   * OpenLLM's version exploded into language x domain x formulation x regional_feature tasks. Here the
-    `domain`, `subject`, `regional_feature`, `country` and `level` fields are attached to each sample
-    (``doc.specific``) so those breakdowns are recovered offline from the details, without thousands
-    of tasks.
+    full per-language task (all questions) is the default, and only the `regional_feature` split is
+    exposed as explicit variant tasks (agnostic / non_agnostic / culture); the finer `domain` and
+    `subject` breakdowns stay as per-sample ``doc.specific`` fields, recovered offline from the
+    details.
 
 --------------------------------------------------------------------------------------------------
 How to run -- task strings are ``community|include_<code>_<formulation>|<n_fewshot>`` where <code> is
@@ -70,6 +71,11 @@ the ISO 639-1 language code (fr, de, es, ...); pass ``--custom-tasks <this file>
                gen  -> the model GENERATES an answer letter, scored by string matching. This is the
                        INCLUDE paper's instruction-tuned protocol; run it 5-shot (``|5``) to match
                        the paper's main setting, e.g. ``community|include_fr_gen|5``.
+  Regional-feature variants: insert the cultural-sensitivity split before the variant suffix, e.g.
+  ``community|include_fr_agnostic_mcf|0``, ``community|include_fr_non_agnostic_cf|0``,
+  ``community|include_fr_culture_gen|5``. Splits are `agnostic` (region-independent), `culture`
+  (culture-specific) and `non_agnostic` (everything but agnostic). The unsuffixed task
+  (``include_fr_mcf``) remains the full set ("all").
   Few-shot examples are drawn from the `validation` split; evaluation on `test`. Metrics: `acc`
   (+ token/char/PMI-normalized variants for the log-likelihood forms). Per-sample `doc.specific`
   carries `domain`, `subject`, `regional_feature` (agnostic / region implicit / region explicit /
@@ -82,6 +88,7 @@ is the ``gen`` variant here.
 
 import re
 import unicodedata
+from functools import partial
 
 import numpy as np
 
@@ -104,6 +111,13 @@ from lighteval.utils.language import Language
 HF_REPO = "CohereLabs/include-base-44"
 
 FORMULATIONS = [MCFFormulation(), CFFormulation(), HybridFormulation()]
+
+# Regional-feature variants built on the dataset's `regional_feature` column (which labels each
+# question agnostic / region implicit / region explicit / culture). Alongside the full per-language
+# task (``regional_feature=None`` -> no filter, the "all" default), three cultural-sensitivity splits
+# are exposed as their own tasks. `non_agnostic` groups every region/culture-dependent label
+# (everything but agnostic).
+REGIONAL_FEATURES = ("agnostic", "non_agnostic", "culture")
 
 # dataset config name (language) -> (short ISO 639-1 code used in the task name, lighteval Language).
 # The Language drives the template's translation literals; the short code gives names like `include_fr`.
@@ -178,9 +192,29 @@ def _make_prompt_fn(language, formulation):
     return prompt_fn
 
 
-def _make_task(language_name, code, language, formulation):
+def _regional_filter(line, feature):
+    """``hf_filter`` predicate selecting one cultural-sensitivity split (see REGIONAL_FEATURES)."""
+    regional_feature = line.get("regional_feature")
+    if feature == "agnostic":
+        return regional_feature == "agnostic"
+    if feature == "culture":
+        return regional_feature == "culture"
+    # "non_agnostic": every region/culture-dependent question (everything but agnostic)
+    return regional_feature != "agnostic"
+
+
+def _regional_name(code, feature):
+    """``include_fr`` or, for a regional variant, ``include_fr_agnostic``."""
+    return f"include_{code}_{feature}" if feature else f"include_{code}"
+
+
+def _regional_filter_kwargs(feature):
+    return {"hf_filter": partial(_regional_filter, feature=feature)} if feature else {}
+
+
+def _make_task(language_name, code, language, formulation, regional_feature=None):
     return LightevalTaskConfig(
-        name=f"include_{code}_{formulation.name.lower()}",
+        name=f"{_regional_name(code, regional_feature)}_{formulation.name.lower()}",
         suite=["community"],
         prompt_function=_make_prompt_fn(language, formulation),
         hf_repo=HF_REPO,
@@ -200,6 +234,7 @@ def _make_task(language_name, code, language, formulation):
         ),
         stop_sequence=["\n"],
         version=0,
+        **_regional_filter_kwargs(regional_feature),
     )
 
 
@@ -265,9 +300,9 @@ include_generative_metric = SampleLevelMetric(
 )
 
 
-def _make_generative_task(language_name, code):
+def _make_generative_task(language_name, code, regional_feature=None):
     return LightevalTaskConfig(
-        name=f"include_{code}_gen",
+        name=f"{_regional_name(code, regional_feature)}_gen",
         suite=["community"],
         prompt_function=_generative_prompt_fn,
         hf_repo=HF_REPO,
@@ -280,11 +315,19 @@ def _make_generative_task(language_name, code):
         metrics=[include_generative_metric],
         stop_sequence=["\n"],
         version=0,
+        **_regional_filter_kwargs(regional_feature),
     )
 
 
+# For each language we register the full task (``regional_feature=None`` -> "all") plus the three
+# cultural-sensitivity splits, for both the log-likelihood (mcf/cf/hybrid) and generative protocols.
 TASKS_TABLE = [
-    _make_task(language_name, code, language, formulation)
+    _make_task(language_name, code, language, formulation, regional_feature)
     for language_name, (code, language) in LANGUAGES.items()
     for formulation in FORMULATIONS
-] + [_make_generative_task(language_name, code) for language_name, (code, _) in LANGUAGES.items()]
+    for regional_feature in (None, *REGIONAL_FEATURES)
+] + [
+    _make_generative_task(language_name, code, regional_feature)
+    for language_name, (code, _) in LANGUAGES.items()
+    for regional_feature in (None, *REGIONAL_FEATURES)
+]
