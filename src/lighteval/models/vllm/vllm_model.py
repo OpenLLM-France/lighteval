@@ -701,6 +701,7 @@ class VLLMModel(LightevalModel):
                     text=result,
                     output_tokens=list(output_token_ids),
                     input_tokens=input_token_ids,
+                    output_truncated=[out.finish_reason == "length" for out in vllm_output.outputs],
                 )
                 results.append(cur_response)
 

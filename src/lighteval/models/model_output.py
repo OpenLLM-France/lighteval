@@ -137,6 +137,14 @@ class ModelResponse:
     # Other metadata
     truncated_tokens_count: int = 0  # How many tokens truncated
     padded_tokens_count: int = 0  # How many tokens of padding
+    # Per generation: did the answer stop because it hit its token budget (i.e. was cut off)? For a
+    # plain generative call this is the whole generation; for a two-phase thinking model it is the
+    # answer phase. Populated by backends that can tell: vLLM / SGLang (native finish reason) and the
+    # two-phase thinking path. Empty when the backend does not set it.
+    output_truncated: list[bool] = field(default_factory=list)
+    # Per generation: did the reasoning phase of a two-phase thinking model hit `thinking_budget`?
+    # Only set on the two-phase path; empty otherwise.
+    reasoning_truncated: list[bool] = field(default_factory=list)
 
     @property
     def final_text(self) -> list[str]:
@@ -156,6 +164,8 @@ class ModelResponse:
             unconditioned_logprobs=[self.unconditioned_logprobs[index]] if self.unconditioned_logprobs else None,
             truncated_tokens_count=self.truncated_tokens_count,
             padded_tokens_count=self.padded_tokens_count,
+            output_truncated=[self.output_truncated[index]] if self.output_truncated else [],
+            reasoning_truncated=[self.reasoning_truncated[index]] if self.reasoning_truncated else [],
         )
 
 

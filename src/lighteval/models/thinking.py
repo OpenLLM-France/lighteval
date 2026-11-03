@@ -333,6 +333,7 @@ def two_phase_generate(
     thinking_texts: list[str] = []
     thinking_tokens: list[list[int]] = []
     samples_per_doc: list[int] = []
+    reasoning_truncated: list[bool] = []
     for i, samples in enumerate(thinking_samples):
         samples_per_doc.append(len(samples))
         for sample in samples:
@@ -343,6 +344,8 @@ def two_phase_generate(
             thinking_texts.append(text)
             thinking_tokens.append(tokens)
             phase2_inputs.append(list(inputs[i]) + tokens)
+            # Reasoning ran out of budget (no natural </think>) -> the generation was cut off.
+            reasoning_truncated.append(len(sample.token_ids) >= thinking_budget)
 
     # Phase 2: answer, continuing after the (now closed) reasoning. One sample each, since the
     # reasoning that precedes it is already fixed.
@@ -353,10 +356,15 @@ def two_phase_generate(
     for i, samples in enumerate(thinking_samples):
         texts: list[str] = []
         token_ids: list[list[int]] = []
+        answer_truncated: list[bool] = []
+        reason_truncated: list[bool] = []
         for _ in range(samples_per_doc[i]):
             answer = answer_samples[flat][0]
             texts.append(thinking_texts[flat] + answer.text)
             token_ids.append(thinking_tokens[flat] + list(answer.token_ids))
+            # Keep the two budgets separate: the answer phase vs the reasoning phase.
+            answer_truncated.append(bool(answer_budget is not None and len(answer.token_ids) >= answer_budget))
+            reason_truncated.append(reasoning_truncated[flat])
             flat += 1
         responses.append(
             ModelResponse(
@@ -364,6 +372,8 @@ def two_phase_generate(
                 text=texts,
                 output_tokens=token_ids,
                 input_tokens=list(inputs[i]),
+                output_truncated=answer_truncated,
+                reasoning_truncated=reason_truncated,
             )
         )
     return responses

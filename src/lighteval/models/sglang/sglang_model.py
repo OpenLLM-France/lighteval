@@ -361,11 +361,13 @@ class SGLangModel(LightevalModel):
                 output_token_ids = [output[1] for output in output_token_logprobs]
                 logprobs = [output[0] for output in output_token_logprobs]
                 result = [sglang_output["text"]]
+                finish_reason = meta_info.get("finish_reason")
                 cur_response = ModelResponse(
                     text=result,
                     logprobs=logprobs,
                     output_tokens=list(output_token_ids),
                     input_tokens=input_token_ids,
+                    output_truncated=[isinstance(finish_reason, dict) and finish_reason.get("type") == "length"],
                 )
                 results.append(cur_response)
         return dataset.get_original_order(results)

@@ -37,6 +37,7 @@ from lighteval.metrics.utils.metric_utils import Metric
 from lighteval.tasks.prompt_manager import FewShotSampler
 from lighteval.tasks.requests import (
     Doc,
+    SamplingMethod,
 )
 from lighteval.utils.utils import ListLike, as_list
 
@@ -145,6 +146,19 @@ class LightevalTaskConfig:
     def __post_init__(self):
         # If we got a Metrics enums instead of a Metric, we convert
         self.metrics = [metric.value if isinstance(metric, Metrics) else metric for metric in self.metrics]
+
+        # Automatically report generation-truncation metrics on every generative task (how often a
+        # generation ran out of token budget), so they need not be added task by task. Added only to
+        # tasks that actually generate, and only if not already present.
+        if any(getattr(m, "category", None) == SamplingMethod.GENERATIVE for m in self.metrics):
+
+            def _key(metric):
+                return tuple(metric.metric_name) if isinstance(metric.metric_name, list) else metric.metric_name
+
+            present = {_key(m) for m in self.metrics}
+            for extra in (Metrics.generation_truncated.value, Metrics.thinking_truncation.value):
+                if _key(extra) not in present:
+                    self.metrics.append(extra)
 
         # Convert list to tuple for hashing
         self.metrics = tuple(self.metrics)
