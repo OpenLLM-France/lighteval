@@ -174,7 +174,7 @@ This fork is maintained by the [OpenLLM-France](https://github.com/OpenLLM-Franc
 - **BBH** (BIG-Bench-Hard) and **BBH-fr** (French), with chain-of-thought
 - **EIFFEL** — French idiomatic-expression MCQ
 - **CARTE** — French regional/cultural knowledge (with abstention-aware metrics)
-- **INCLUDE** — multilingual regional-knowledge exams
+- **INCLUDE** — multilingual regional-knowledge exams, with per-language cultural-sensitivity variants (agnostic / non-agnostic / culture) on top of the full set
 - **Multilingual PIQA** — physical commonsense
 - **Multilingual AIME 2025** (French, German, …)
 - **BLEnD** — multilingual everyday cultural commonsense
@@ -196,6 +196,9 @@ This fork is maintained by the [OpenLLM-France](https://github.com/OpenLLM-Franc
 
 **Long context**
 - **RULER** (metric + prompts)
+
+**Code / web generation**
+- **WebApp1K** (`extended|webapp1k`) — test-driven React web-app generation: the model writes a component that must pass the task's Jest success *and* failure tests, scored by pass@1 via a real Jest runner. Needs a one-time Node/Jest setup (`src/lighteval/tasks/extended/webapp1k/jsenv/`); see that folder's README.
 
 ### Reasoning ("thinking") model support
 - Two-phase generation with a separate **thinking budget** (default 5k) so the reasoning trace does not eat into the answer budget

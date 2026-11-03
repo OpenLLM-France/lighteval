@@ -29,6 +29,17 @@ import lighteval.tasks.extended.mix_eval.main as mix_eval
 import lighteval.tasks.extended.mt_bench.main as mt_bench
 import lighteval.tasks.extended.olympiade_bench.main as olympiad_bench
 import lighteval.tasks.extended.tiny_benchmarks.main as tiny_benchmarks
+import lighteval.tasks.extended.webapp1k.main as webapp1k
 
 
-AVAILABLE_EXTENDED_TASKS_MODULES = [ifeval, ifbench, tiny_benchmarks, mt_bench, mix_eval, olympiad_bench, hle, lcb]
+AVAILABLE_EXTENDED_TASKS_MODULES = [
+    ifeval,
+    ifbench,
+    tiny_benchmarks,
+    mt_bench,
+    mix_eval,
+    olympiad_bench,
+    hle,
+    lcb,
+    webapp1k,
+]
