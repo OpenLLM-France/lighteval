@@ -94,7 +94,7 @@ import numpy as np
 
 from lighteval.metrics.dynamic_metrics import LogLikelihoodAccMetric
 from lighteval.metrics.metrics_sample import SampleLevelComputation
-from lighteval.metrics.normalizations import LogProbCharNorm, LogProbPMINorm, LogProbTokenNorm
+from lighteval.metrics.normalizations import LogProbCharNorm, LogProbTokenNorm
 from lighteval.metrics.utils.metric_utils import SampleLevelMetric, SamplingMethod
 from lighteval.tasks.lighteval_task import LightevalTaskConfig
 from lighteval.tasks.multilingual.utils.task_utils import get_metrics_for_formulation
@@ -229,7 +229,6 @@ def _make_task(language_name, code, language, formulation, regional_feature=None
             [
                 LogLikelihoodAccMetric(normalization=LogProbTokenNorm()),
                 LogLikelihoodAccMetric(normalization=LogProbCharNorm()),
-                LogLikelihoodAccMetric(normalization=LogProbPMINorm()),
             ],
         ),
         stop_sequence=["\n"],
