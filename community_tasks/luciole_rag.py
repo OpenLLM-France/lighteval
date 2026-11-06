@@ -43,7 +43,11 @@ One ``luciole_rag:<subset>`` task per subset (``hotpotqa``, ``hotpotqa_fr``,
 ``reranked_gold`` split of OpenRAG Bench, read from the private ``luciole``
 config of ``OpenLLM-France/OpenRAG-Bench`` (needs a Hugging Face token with
 access to the organization); its 83 natural unanswerables come on top of the
-synthetic ones. A deterministic
+synthetic ones. Each subset also has a ``luciole_rag:<subset>_generic`` variant
+whose refusal rule asks to say that the documents do not allow an answer and to
+invite the user to rephrase, instead of imposing an exact refusal phrase; it
+measures the decision to refuse apart from obeying the phrase (judged refusal
+metrics only). A deterministic
 md5-based partition on the row id drops the supporting chunks on a fraction of
 the answerable rows, turning them into synthetic unanswerables. Each dropped
 chunk is replaced by a non-supporting chunk of another row of the same split,
@@ -544,6 +548,23 @@ REFUSAL_INSTRUCTION = {
     ),
 }
 
+# Generic refusal rule, worded as in the Luciole RAG SFT data and the OpenRAG
+# inference prompt: no imposed phrase. Used by the "<subset>_generic" task
+# variants, which separate obeying the imposed phrase from deciding to refuse.
+# Only the judged refusal metrics are meaningful there; the refusal_format_*
+# metrics still look for the strict phrase.
+GENERIC_REFUSAL_INSTRUCTION = {
+    "en": (
+        "If the context is **insufficient** to answer the question, state that the retrieved documents "
+        "do not allow you to answer and invite the user to rephrase the query or add relevant documents."
+    ),
+    "fr": (
+        "Si le contexte est **insuffisant** pour répondre à la question, indiquez que les documents récupérés "
+        "ne permettent pas de répondre et invitez l'utilisateur à reformuler sa requête ou à ajouter des documents pertinents."
+    ),
+}
+REFUSAL_INSTRUCTIONS = {"strict": REFUSAL_INSTRUCTION, "generic": GENERIC_REFUSAL_INSTRUCTION}
+
 SYSTEM_PROMPT_EN = (
     "You are an AI conversational assistant specialized in **information retrieval and synthesis**.\n"
     "Your goal is to provide **precise, reliable, and well-structured answers** using **only the retrieved documents** (`Context`).\n"
@@ -761,7 +782,9 @@ def _select_backfill(
     return min(eligible, key=lambda chunk: abs(len(chunk[1]) - len(document)))
 
 
-def luciole_rag_prompt(line, task_name: str | None = None, backfill_pool: BackfillPool | None = None) -> Doc:
+def luciole_rag_prompt(
+    line, task_name: str | None = None, backfill_pool: BackfillPool | None = None, refusal_rule: str = "strict"
+) -> Doc:
     """Convert one prompt-agnostic row into a lighteval Doc.
 
     A deterministic md5-based bucket on the row id decides whether to drop
@@ -842,7 +865,7 @@ def luciole_rag_prompt(line, task_name: str | None = None, backfill_pool: Backfi
     system_content = template.format(
         context=context,
         citation_instruction=CITATION_INSTRUCTION[language],
-        refusal_instruction=REFUSAL_INSTRUCTION[language],
+        refusal_instruction=REFUSAL_INSTRUCTIONS[refusal_rule][language],
     )
 
     return Doc(
@@ -1464,20 +1487,20 @@ def _backfill_pool(subset: str) -> BackfillPool:
     return BackfillPool(rows)
 
 
-def _subset_prompt(subset: str):
+def _subset_prompt(subset: str, refusal_rule: str = "strict"):
     def prompt(line, task_name: str | None = None) -> Doc:
         pool = _backfill_pool(subset) if DROP_RATIO > 0 else None
-        return luciole_rag_prompt(line, task_name, backfill_pool=pool)
+        return luciole_rag_prompt(line, task_name, backfill_pool=pool, refusal_rule=refusal_rule)
 
     return prompt
 
 
-def _make_task(subset: str) -> LightevalTaskConfig:
+def _make_task(subset: str, refusal_rule: str = "strict") -> LightevalTaskConfig:
     evaluation_split = DATASET_EVAL_SPLITS.get(subset, "test")
     repo, config, revision = _dataset_source(subset)
     return LightevalTaskConfig(
-        name=f"luciole_rag:{subset}",
-        prompt_function=_subset_prompt(subset),
+        name=f"luciole_rag:{subset}" + ("" if refusal_rule == "strict" else f"_{refusal_rule}"),
+        prompt_function=_subset_prompt(subset, refusal_rule),
         suite=["community"],
         hf_repo=repo,
         hf_subset=config,
@@ -1493,4 +1516,4 @@ def _make_task(subset: str) -> LightevalTaskConfig:
     )
 
 
-TASKS_TABLE = [_make_task(s) for s in DATASET_SUBSETS]
+TASKS_TABLE = [_make_task(s) for s in DATASET_SUBSETS] + [_make_task(s, "generic") for s in DATASET_SUBSETS]
