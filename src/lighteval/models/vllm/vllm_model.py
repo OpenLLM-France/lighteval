@@ -731,8 +731,19 @@ class VLLMModel(LightevalModel):
             returns_logits=False,
             num_samples=num_samples,
         )
+        # A phase-1 sample ended on EOS (the model finished its turn) when vLLM reports finish_reason
+        # "stop" with no stop_reason: a stop on the end tag string or token id sets stop_reason to it,
+        # and hitting the budget gives finish_reason "length". See two_phase_generate for how this is
+        # used to skip the answer phase.
         return [
-            [ThinkingGenSample(text=sample.text, token_ids=list(sample.token_ids)) for sample in out.outputs]
+            [
+                ThinkingGenSample(
+                    text=sample.text,
+                    token_ids=list(sample.token_ids),
+                    ended_at_eos=(sample.finish_reason == "stop" and sample.stop_reason is None),
+                )
+                for sample in out.outputs
+            ]
             for out in outputs
         ]
 

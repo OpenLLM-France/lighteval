@@ -166,10 +166,16 @@ class ThinkingGenSample:
     ``text`` and ``token_ids`` must be *consistent* and must **exclude** the stop sequence
     (``</think>``): the orchestrator appends the closing tag itself, exactly once, so a
     generate_fn that leaves the stop string in would double it.
+
+    ``ended_at_eos`` is True when phase-1 generation stopped because the model emitted EOS (it ended
+    its turn), as opposed to stopping at the reasoning end tag or the thinking budget. A backend that
+    cannot tell leaves it False. When True, the sample is already a complete response (reasoning and
+    answer) and the orchestrator returns it as-is, with no end tag appended and no answer phase.
     """
 
     text: str
     token_ids: list[int]
+    ended_at_eos: bool = False
 
 
 # A backend generation primitive: given a batch of pre-tokenized prompts, a max number of new
@@ -312,10 +318,12 @@ def two_phase_generate(
 ) -> list[ModelResponse]:
     """Two-phase generation for thinking models, shared by every generative backend.
 
-    Phase 1 generates the reasoning, stopping at the end tag (or at ``thinking_budget`` tokens).
-    We always re-append the end tag afterwards, which both closes a reasoning that ran out of
-    budget without stopping and restores the tag the stop condition strips, so the answer phase
-    always starts from a well-formed ``...<end_tag>``. Phase 2 generates the answer with
+    Phase 1 generates the reasoning, stopping at the end tag, at ``thinking_budget`` tokens, or when
+    the model ends its turn with EOS. A sample that ended on EOS is already a complete response and is
+    returned as-is (no end tag appended, no answer phase) -- appending ``</think>`` there would mark
+    the whole output as reasoning and the downstream reasoning-stripping would then discard the
+    answer. Otherwise the end tag is re-appended (closing a reasoning that hit the budget, and
+    restoring the tag the stop condition strips) and phase 2 generates the answer with
     ``answer_budget`` tokens. The returned text/tokens concatenate both phases, so downstream
     reasoning-tag stripping and the details logs see the full generation.
 
@@ -326,45 +334,73 @@ def two_phase_generate(
     (Mistral); empty for string tags (``</think>``). See `reasoning_stop_config`.
     """
     stop_thinking_token_ids = list(stop_thinking_token_ids or [])
-    # Phase 1: reasoning, stopped at the end tag (by string and/or by its token id).
+    # Phase 1: reasoning, stopped at the end tag (by string and/or by its token id), at the budget,
+    # or when the model ends its turn with EOS.
     thinking_samples = generate_fn(inputs, thinking_budget, [end_tag], stop_thinking_token_ids, num_samples)
 
-    phase2_inputs: list[list[int]] = []
-    thinking_texts: list[str] = []
-    thinking_tokens: list[list[int]] = []
+    # Flatten the phase-1 samples, remembering which doc each belongs to.
+    flat_doc: list[int] = []
+    flat_samples: list[ThinkingGenSample] = []
     samples_per_doc: list[int] = []
-    reasoning_truncated: list[bool] = []
     for i, samples in enumerate(thinking_samples):
         samples_per_doc.append(len(samples))
         for sample in samples:
+            flat_doc.append(i)
+            flat_samples.append(sample)
+
+    # Decide per sample whether an answer phase is needed. A sample whose phase 1 ended on EOS is
+    # already complete (the model finished its turn, answer included): keep it as-is, with no end tag
+    # and no phase 2. Only samples that stopped at the end tag (ready to answer) or hit the thinking
+    # budget (truncated reasoning, force-closed) get an answer phase.
+    thinking_texts: list[str] = []
+    thinking_tokens: list[list[int]] = []
+    reasoning_truncated: list[bool] = []
+    phase2_index: list[Optional[int]] = []  # position of this sample in answer_samples, or None
+    phase2_inputs: list[list[int]] = []
+    for sample, i in zip(flat_samples, flat_doc):
+        if sample.ended_at_eos:
+            thinking_texts.append(sample.text)
+            thinking_tokens.append(list(sample.token_ids))
+            reasoning_truncated.append(False)
+            phase2_index.append(None)
+        else:
             # generate_fn returns text/tokens without the end-tag stop: close it explicitly (this
             # also closes a reasoning that hit the budget without ever emitting the end tag).
             text = sample.text + end_tag
             tokens = list(sample.token_ids) + close_tag_ids
             thinking_texts.append(text)
             thinking_tokens.append(tokens)
-            phase2_inputs.append(list(inputs[i]) + tokens)
-            # Reasoning ran out of budget (no natural </think>) -> the generation was cut off.
+            # Reasoning ran out of budget (no natural </think>, no EOS) -> the generation was cut off.
             reasoning_truncated.append(len(sample.token_ids) >= thinking_budget)
+            phase2_index.append(len(phase2_inputs))
+            phase2_inputs.append(list(inputs[i]) + tokens)
 
     # Phase 2: answer, continuing after the (now closed) reasoning. One sample each, since the
-    # reasoning that precedes it is already fixed.
-    answer_samples = generate_fn(phase2_inputs, answer_budget, [], [], 1)
+    # reasoning that precedes it is already fixed. Skipped entirely when every sample ended on EOS.
+    answer_samples = generate_fn(phase2_inputs, answer_budget, [], [], 1) if phase2_inputs else []
 
     responses: list[ModelResponse] = []
     flat = 0
-    for i, samples in enumerate(thinking_samples):
+    for i, n in enumerate(samples_per_doc):
         texts: list[str] = []
         token_ids: list[list[int]] = []
         answer_truncated: list[bool] = []
         reason_truncated: list[bool] = []
-        for _ in range(samples_per_doc[i]):
-            answer = answer_samples[flat][0]
-            texts.append(thinking_texts[flat] + answer.text)
-            token_ids.append(thinking_tokens[flat] + list(answer.token_ids))
-            # Keep the two budgets separate: the answer phase vs the reasoning phase.
-            answer_truncated.append(bool(answer_budget is not None and len(answer.token_ids) >= answer_budget))
-            reason_truncated.append(reasoning_truncated[flat])
+        for _ in range(n):
+            j = phase2_index[flat]
+            if j is None:
+                # EOS-complete sample: the phase-1 output is the whole response.
+                texts.append(thinking_texts[flat])
+                token_ids.append(thinking_tokens[flat])
+                answer_truncated.append(False)
+                reason_truncated.append(False)
+            else:
+                answer = answer_samples[j][0]
+                texts.append(thinking_texts[flat] + answer.text)
+                token_ids.append(thinking_tokens[flat] + list(answer.token_ids))
+                # Keep the two budgets separate: the answer phase vs the reasoning phase.
+                answer_truncated.append(bool(answer_budget is not None and len(answer.token_ids) >= answer_budget))
+                reason_truncated.append(reasoning_truncated[flat])
             flat += 1
         responses.append(
             ModelResponse(

@@ -319,19 +319,19 @@ class Metrics(Enum):
         corpus_level_fn=np.mean,
         higher_is_better=True,
     )
-    generation_truncated = SampleLevelMetricGrouping(
-        metric_name=["truncation_rate", "truncation_count"],
-        sample_level_fn=GenerationTruncated(attribute="output_truncated", prefix="truncation"),
+    generation_truncated = SampleLevelMetric(
+        metric_name="truncation_rate",
+        sample_level_fn=GenerationTruncated(attribute="output_truncated"),
         category=SamplingMethod.GENERATIVE,
-        corpus_level_fn={"truncation_rate": np.mean, "truncation_count": np.sum},
-        higher_is_better={"truncation_rate": False, "truncation_count": False},
+        corpus_level_fn=np.mean,
+        higher_is_better=False,
     )
-    thinking_truncation = SampleLevelMetricGrouping(
-        metric_name=["thinking_truncation_rate", "thinking_truncation_count"],
-        sample_level_fn=GenerationTruncated(attribute="reasoning_truncated", prefix="thinking_truncation"),
+    thinking_truncation = SampleLevelMetric(
+        metric_name="thinking_truncation_rate",
+        sample_level_fn=GenerationTruncated(attribute="reasoning_truncated"),
         category=SamplingMethod.GENERATIVE,
-        corpus_level_fn={"thinking_truncation_rate": np.mean, "thinking_truncation_count": np.sum},
-        higher_is_better={"thinking_truncation_rate": False, "thinking_truncation_count": False},
+        corpus_level_fn=np.mean,
+        higher_is_better=False,
     )
     g_pass_at_k = SampleLevelMetricGrouping(
         metric_name="g-pass@k",

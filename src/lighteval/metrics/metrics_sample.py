@@ -79,25 +79,22 @@ class SampleLevelComputation(ABC):
 
 
 class GenerationTruncated(SampleLevelComputation):
-    """Whether a generation was cut off because it reached a token budget.
+    """Fraction of a sample's generations that were cut off at a token budget.
 
     Reads a boolean-per-generation flag from the ``ModelResponse`` (``attribute``), set at generation
     time by the backends that can tell: vLLM / SGLang (native finish reason) and the shared two-phase
     thinking path. ``attribute="output_truncated"`` tracks the answer (or, for a plain generative
     call, the whole generation) hitting its budget; ``attribute="reasoning_truncated"`` tracks a
     thinking model's reasoning phase hitting ``thinking_budget``. Backends that do not populate the
-    flag report 0.0. Reported as a grouping, ``<prefix>_rate`` (mean over the corpus) and
-    ``<prefix>_count`` (sum over the corpus -> number of truncated generations).
+    flag report 0.0. Aggregated with the mean -> the fraction of truncated generations.
     """
 
-    def __init__(self, attribute: str = "output_truncated", prefix: str = "truncation"):
+    def __init__(self, attribute: str = "output_truncated"):
         self.attribute = attribute
-        self.prefix = prefix
 
-    def compute(self, model_response: ModelResponse, doc: Doc, **kwargs) -> dict:
+    def compute(self, model_response: ModelResponse, doc: Doc, **kwargs) -> float:
         flags = getattr(model_response, self.attribute, None) or []
-        value = (sum(1 for f in flags if f) / len(flags)) if flags else 0.0
-        return {f"{self.prefix}_rate": value, f"{self.prefix}_count": value}
+        return (sum(1 for f in flags if f) / len(flags)) if flags else 0.0
 
 
 class ExactMatches(SampleLevelComputation):
