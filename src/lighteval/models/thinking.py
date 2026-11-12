@@ -204,7 +204,9 @@ def prompt_primes_thinking(rendered_prompt: str, tags: tuple[str, str] = (THINK_
     return end_tag not in rendered_prompt[idx:]
 
 
-def detect_thinking_model(tokenizer, use_chat_template: bool, enable_thinking: Optional[bool]) -> bool:
+def detect_thinking_model(
+    tokenizer, use_chat_template: bool, enable_thinking: Optional[bool], chat_template_kwargs: Optional[dict] = None
+) -> bool:
     """Decide from the tokenizer chat template whether the model reasons before answering.
 
     We look for any of three signals:
@@ -248,7 +250,11 @@ def detect_thinking_model(tokenizer, use_chat_template: bool, enable_thinking: O
     tags = resolve_reasoning_tags(tokenizer)
 
     def _render(et: Optional[bool]) -> str:
-        extra = {} if et is None else {"enable_thinking": et}
+        # Render exactly as the eval will: forward the same chat_template_kwargs (e.g.
+        # reasoning_effort) so a template that only primes <think> in a given reasoning mode is
+        # detected in that mode. Needed for models that gate reasoning on a template kwarg rather than
+        # enable_thinking (e.g. Bielik's reasoning_effort).
+        extra = {**(chat_template_kwargs or {}), **({"enable_thinking": et} if et is not None else {})}
         return tokenizer.apply_chat_template(
             [{"role": "user", "content": ""}],
             tokenize=False,
@@ -289,6 +295,7 @@ def resolve_is_thinking_model(
     use_chat_template: bool,
     enable_thinking: Optional[bool],
     thinking_budget_is_set: bool,
+    chat_template_kwargs: Optional[dict] = None,
 ) -> bool:
     """Whether to use two-phase thinking generation for this model.
 
@@ -301,7 +308,7 @@ def resolve_is_thinking_model(
     """
     if thinking_budget_is_set:
         return True
-    return detect_thinking_model(tokenizer, use_chat_template, enable_thinking)
+    return detect_thinking_model(tokenizer, use_chat_template, enable_thinking, chat_template_kwargs)
 
 
 def two_phase_generate(

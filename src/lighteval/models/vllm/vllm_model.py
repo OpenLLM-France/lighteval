@@ -358,6 +358,7 @@ class VLLMModel(LightevalModel):
             self.use_chat_template,
             config.enable_thinking,
             config.generation_parameters.thinking_budget is not None,
+            config.chat_template_kwargs,
         )
         # Reasoning tags this model actually emits (``<think>``/``</think>`` by default, or e.g.
         # Mistral ``[THINK]``/``[/THINK]`` when declared as special tokens).
