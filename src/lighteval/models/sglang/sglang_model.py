@@ -172,7 +172,11 @@ class SGLangModel(LightevalModel):
         self.attention_backend = config.attention_backend
         self.pairwise_tokenization = config.pairwise_tokenization
         self.prompt_manager = PromptManager(
-            self.use_chat_template, self.tokenizer, config.system_prompt, enable_thinking=config.enable_thinking
+            use_chat_template=self.use_chat_template,
+            tokenizer=self.tokenizer,
+            system_prompt=config.system_prompt,
+            enable_thinking=config.enable_thinking,
+            chat_template_kwargs=config.chat_template_kwargs,
         )
 
         # Decide whether to use two-phase thinking generation, so the reasoning

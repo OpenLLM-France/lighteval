@@ -163,6 +163,7 @@ class LiteLLMClient(LightevalModel):
             tokenizer=self.tokenizer,
             system_prompt=config.system_prompt,
             enable_thinking=config.enable_thinking,
+            chat_template_kwargs=config.chat_template_kwargs,
         )
 
         # Initialize cache for tokenization and predictions

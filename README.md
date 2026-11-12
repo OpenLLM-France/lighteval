@@ -203,6 +203,7 @@ This fork is maintained by the [OpenLLM-France](https://github.com/OpenLLM-Franc
 ### Reasoning ("thinking") model support
 - Two-phase generation with a separate **thinking budget** (default 5k) so the reasoning trace does not eat into the answer budget
 - `enable_thinking` option
+- Pass-through for arbitrary chat-template kwargs via `chat_template_kwargs` (e.g. `chat_template_kwargs={reasoning_effort:high}` for models like Bielik-11B-v3.1 that gate reasoning on `reasoning_effort` rather than `enable_thinking`)
 - Automatic detection of thinking models and their reasoning tags — `<think>…</think>` and Mistral `[THINK]…[/THINK]`
 - Robust stripping of reasoning traces (including models that prime the opening tag in the generation prompt)
 
