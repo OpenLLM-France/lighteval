@@ -46,11 +46,13 @@ class PromptManager:
         tokenizer=None,
         system_prompt: str | None = None,
         enable_thinking: bool | None = None,
+        chat_template_kwargs: dict | None = None,
     ):
         self.use_chat_template = use_chat_template
         self.tokenizer = tokenizer
         self.system_prompt = system_prompt  # System prompt to be used in chat templates
         self.enable_thinking = enable_thinking
+        self.chat_template_kwargs = chat_template_kwargs  # extra kwargs forwarded to apply_chat_template
 
     def prepare_prompt(self, doc: Doc) -> str:
         """Prepare a prompt from a document, either using chat template or plain text format.
@@ -89,6 +91,8 @@ class PromptManager:
         kwargs = {}
         if self.enable_thinking is not None:
             kwargs["enable_thinking"] = self.enable_thinking
+        if self.chat_template_kwargs:
+            kwargs.update(self.chat_template_kwargs)
         return self.tokenizer.apply_chat_template(
             message,
             tokenize=False,
@@ -178,6 +182,8 @@ class PromptManager:
         kwargs = {}
         if self.enable_thinking is not None:
             kwargs["enable_thinking"] = self.enable_thinking
+        if self.chat_template_kwargs:
+            kwargs.update(self.chat_template_kwargs)
         rendered = self.tokenizer.apply_chat_template(
             messages,
             tokenize=False,

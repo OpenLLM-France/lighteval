@@ -78,6 +78,25 @@ class SampleLevelComputation(ABC):
         return f"{self.__class__.__name__}({', '.join(attr_strs)})"
 
 
+class GenerationTruncated(SampleLevelComputation):
+    """Fraction of a sample's generations that were cut off at a token budget.
+
+    Reads a boolean-per-generation flag from the ``ModelResponse`` (``attribute``), set at generation
+    time by the backends that can tell: vLLM / SGLang (native finish reason) and the shared two-phase
+    thinking path. ``attribute="output_truncated"`` tracks the answer (or, for a plain generative
+    call, the whole generation) hitting its budget; ``attribute="reasoning_truncated"`` tracks a
+    thinking model's reasoning phase hitting ``thinking_budget``. Backends that do not populate the
+    flag report 0.0. Aggregated with the mean -> the fraction of truncated generations.
+    """
+
+    def __init__(self, attribute: str = "output_truncated"):
+        self.attribute = attribute
+
+    def compute(self, model_response: ModelResponse, doc: Doc, **kwargs) -> float:
+        flags = getattr(model_response, self.attribute, None) or []
+        return (sum(1 for f in flags if f) / len(flags)) if flags else 0.0
+
+
 class ExactMatches(SampleLevelComputation):
     def __init__(
         self,

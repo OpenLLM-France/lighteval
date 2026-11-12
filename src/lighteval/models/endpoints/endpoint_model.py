@@ -267,6 +267,7 @@ class InferenceEndpointModel(LightevalModel):
             tokenizer=self.tokenizer,
             system_prompt=config.system_prompt,
             enable_thinking=config.enable_thinking,
+            chat_template_kwargs=config.chat_template_kwargs,
         )
         self.generation_parameters = config.generation_parameters
         self.generation_config = self.generation_parameters.to_tgi_ie_dict()

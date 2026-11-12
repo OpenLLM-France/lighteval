@@ -246,6 +246,7 @@ class TransformersModel(LightevalModel):
             tokenizer=self.tokenizer,
             system_prompt=config.system_prompt,
             enable_thinking=config.enable_thinking,
+            chat_template_kwargs=config.chat_template_kwargs,
         )
 
         # Decide whether to use two-phase thinking generation, so the reasoning
@@ -332,6 +333,7 @@ class TransformersModel(LightevalModel):
             tokenizer=self.tokenizer,
             system_prompt=config.system_prompt if config else None,
             enable_thinking=config.enable_thinking if config else None,
+            chat_template_kwargs=config.chat_template_kwargs if config else None,
         )
 
         # Decide whether to use two-phase thinking generation, so the reasoning

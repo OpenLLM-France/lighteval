@@ -344,7 +344,11 @@ class VLLMModel(LightevalModel):
         self.pairwise_tokenization = config.pairwise_tokenization
 
         self.prompt_manager = PromptManager(
-            self.use_chat_template, self.tokenizer, config.system_prompt, enable_thinking=config.enable_thinking
+            use_chat_template=self.use_chat_template,
+            tokenizer=self.tokenizer,
+            system_prompt=config.system_prompt,
+            enable_thinking=config.enable_thinking,
+            chat_template_kwargs=config.chat_template_kwargs,
         )
 
         # Decide whether to use two-phase thinking generation, so the reasoning
@@ -701,6 +705,7 @@ class VLLMModel(LightevalModel):
                     text=result,
                     output_tokens=list(output_token_ids),
                     input_tokens=input_token_ids,
+                    output_truncated=[out.finish_reason == "length" for out in vllm_output.outputs],
                 )
                 results.append(cur_response)
 
@@ -730,8 +735,19 @@ class VLLMModel(LightevalModel):
             returns_logits=False,
             num_samples=num_samples,
         )
+        # A phase-1 sample ended on EOS (the model finished its turn) when vLLM reports finish_reason
+        # "stop" with no stop_reason: a stop on the end tag string or token id sets stop_reason to it,
+        # and hitting the budget gives finish_reason "length". See two_phase_generate for how this is
+        # used to skip the answer phase.
         return [
-            [ThinkingGenSample(text=sample.text, token_ids=list(sample.token_ids)) for sample in out.outputs]
+            [
+                ThinkingGenSample(
+                    text=sample.text,
+                    token_ids=list(sample.token_ids),
+                    ended_at_eos=(sample.finish_reason == "stop" and sample.stop_reason is None),
+                )
+                for sample in out.outputs
+            ]
             for out in outputs
         ]
 

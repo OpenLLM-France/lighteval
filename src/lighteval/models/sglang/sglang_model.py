@@ -172,7 +172,11 @@ class SGLangModel(LightevalModel):
         self.attention_backend = config.attention_backend
         self.pairwise_tokenization = config.pairwise_tokenization
         self.prompt_manager = PromptManager(
-            self.use_chat_template, self.tokenizer, config.system_prompt, enable_thinking=config.enable_thinking
+            use_chat_template=self.use_chat_template,
+            tokenizer=self.tokenizer,
+            system_prompt=config.system_prompt,
+            enable_thinking=config.enable_thinking,
+            chat_template_kwargs=config.chat_template_kwargs,
         )
 
         # Decide whether to use two-phase thinking generation, so the reasoning
@@ -361,11 +365,13 @@ class SGLangModel(LightevalModel):
                 output_token_ids = [output[1] for output in output_token_logprobs]
                 logprobs = [output[0] for output in output_token_logprobs]
                 result = [sglang_output["text"]]
+                finish_reason = meta_info.get("finish_reason")
                 cur_response = ModelResponse(
                     text=result,
                     logprobs=logprobs,
                     output_tokens=list(output_token_ids),
                     input_tokens=input_token_ids,
+                    output_truncated=[isinstance(finish_reason, dict) and finish_reason.get("type") == "length"],
                 )
                 results.append(cur_response)
         return dataset.get_original_order(results)

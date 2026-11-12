@@ -90,6 +90,9 @@ class ModelConfig(BaseModel, extra="forbid"):
     enable_thinking: bool | None = (
         None  # whether to enable thinking mode in chat template (for models that support it). None means use the model's default.
     )
+    chat_template_kwargs: dict | None = (
+        None  # extra kwargs forwarded to the tokenizer's apply_chat_template, e.g. {"reasoning_effort": "high"} for Bielik.
+    )
     cache_dir: str = os.path.join(os.environ.get("HF_HOME", "~/.cache/huggingface"), "lighteval")
 
     @classmethod
@@ -137,24 +140,26 @@ class ModelConfig(BaseModel, extra="forbid"):
                 'model': {'model_name': 'gpt2', 'use_cache': True, 'generation_parameters': {'temperature': 0.7}},
             }
         """
-        # Looking for generation_parameters in the model_args
-        generation_parameters_dict = None
-        pattern = re.compile(r"(\w+)=(\{.*\}|[^,]+)")
-        matches = pattern.findall(args)
-        for key, value in matches:
+        # Parse the nested JSON-like fields first (generation_parameters, chat_template_kwargs), then
+        # strip them out so the remaining comma-separated args can be split naively. The pattern is
+        # non-greedy so several {...} fields in the same string do not get merged into one.
+        nested_dict_keys = ("generation_parameters", "chat_template_kwargs")
+        nested_values: dict = {}
+        pattern = re.compile(r"(\w+)=(\{.*?\}|[^,]+)")
+        for key, value in pattern.findall(args):
             key = key.strip()
-            if key == "generation_parameters":
+            if key in nested_dict_keys:
                 # Keys must be quoted (since they are strings)
-                gen_params = re.sub(r"(\w+):", r'"\1":', value)
+                parsed = re.sub(r"(\w+):", r'"\1":', value)
                 # for k, v where v are strings, we quote them too
-                gen_params = re.sub(r":\s*([A-Za-z_][\w.-]*)\s*(?=[,}])", r':"\1"', gen_params)
-                generation_parameters_dict = json.loads(gen_params)
+                parsed = re.sub(r":\s*([A-Za-z_][\w.-]*)\s*(?=[,}])", r':"\1"', parsed)
+                nested_values[key] = json.loads(parsed)
 
-        args = re.sub(r"generation_parameters=\{.*?\},?", "", args).strip(",")
-        model_config = {k.split("=")[0]: k.split("=")[1] if "=" in k else True for k in args.split(",")}
-
-        if generation_parameters_dict is not None:
-            model_config["generation_parameters"] = generation_parameters_dict
+        for key in nested_dict_keys:
+            args = re.sub(rf"{key}=\{{.*?\}},?", "", args)
+        args = args.strip(",")
+        model_config = {k.split("=")[0]: k.split("=")[1] if "=" in k else True for k in args.split(",") if k}
+        model_config.update(nested_values)
 
         return model_config
 

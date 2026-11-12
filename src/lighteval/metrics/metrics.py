@@ -52,6 +52,7 @@ from lighteval.metrics.metrics_sample import (
     Extractiveness,
     F1_score,
     Faithfulness,
+    GenerationTruncated,
     GPassAtK,
     JudgeLLMSimpleQA,
     LoglikelihoodAcc,
@@ -317,6 +318,20 @@ class Metrics(Enum):
         category=SamplingMethod.GENERATIVE,
         corpus_level_fn=np.mean,
         higher_is_better=True,
+    )
+    generation_truncated = SampleLevelMetric(
+        metric_name="truncation_rate",
+        sample_level_fn=GenerationTruncated(attribute="output_truncated"),
+        category=SamplingMethod.GENERATIVE,
+        corpus_level_fn=np.mean,
+        higher_is_better=False,
+    )
+    thinking_truncation = SampleLevelMetric(
+        metric_name="thinking_truncation_rate",
+        sample_level_fn=GenerationTruncated(attribute="reasoning_truncated"),
+        category=SamplingMethod.GENERATIVE,
+        corpus_level_fn=np.mean,
+        higher_is_better=False,
     )
     g_pass_at_k = SampleLevelMetricGrouping(
         metric_name="g-pass@k",
