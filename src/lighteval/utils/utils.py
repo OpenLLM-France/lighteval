@@ -337,6 +337,28 @@ def remove_reasoning_tags(text: str, tag_pairs: list[tuple[str, str]] = DEFAULT_
     return result
 
 
+def split_reasoning(text: str, tag_pairs: Iterable[tuple[str, str]] = DEFAULT_REASONING_TAG_PAIRS) -> tuple[str, str]:
+    """Split a generation into ``(reasoning, answer)`` at the first reasoning end tag.
+
+    Finds the earliest closing tag from ``tag_pairs`` (``</think>`` or ``[/THINK]`` by default) and
+    returns the text before it as the reasoning and the text after it as the answer; when no end tag
+    is present there is no reasoning, so it returns ``("", text)``. This targets the shape lighteval
+    produces for thinking models, where the opening tag is primed in the generation prompt (only the
+    closing tag appears in the output) and the reasoning precedes the answer. Unlike
+    ``remove_reasoning_tags``, it keeps the reasoning (to score it on its own) and splits only at the
+    first end tag rather than removing every ``start … end`` block.
+    """
+    first = None
+    for _, end_tag in tag_pairs:
+        idx = text.find(end_tag)
+        if idx != -1 and (first is None or idx < first[0]):
+            first = (idx, end_tag)
+    if first is None:
+        return "", text
+    idx, end_tag = first
+    return text[:idx], text[idx + len(end_tag) :]
+
+
 def strip_reasoning(
     text: str,
     tag_pairs: Iterable[tuple[str, str]] = DEFAULT_REASONING_TAG_PAIRS,

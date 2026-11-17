@@ -206,6 +206,7 @@ This fork is maintained by the [OpenLLM-France](https://github.com/OpenLLM-Franc
 - Pass-through for arbitrary chat-template kwargs via `chat_template_kwargs` (e.g. `chat_template_kwargs={reasoning_effort:high}` for models like Bielik-11B-v3.1 that gate reasoning on `reasoning_effort` rather than `enable_thinking`)
 - Automatic detection of thinking models and their reasoning tags — `<think>…</think>` and Mistral `[THINK]…[/THINK]`
 - Robust stripping of reasoning traces (including models that prime the opening tag in the generation prompt)
+- Per-generation diagnostics reported automatically on every generative task: `truncation_rate` / `thinking_truncation_rate` (answer or reasoning hit its token budget) and `loop_rate` / `thinking_loop_rate` (answer or reasoning ends in a repetition loop)
 
 ### LLM-as-judge improvements
 - **Run the judge fully offline as a local (vLLM) model** — any Hugging Face model can be the judge, removing the hard dependency on an OpenAI/API judge. This is what makes it possible to use local safety judges such as Llama Guard 4, wildguard or Qwen in the safety benchmarks.

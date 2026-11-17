@@ -55,7 +55,7 @@ from lighteval.metrics.utils.judge_utils import get_judge_prompt_simpleqa, proce
 from lighteval.metrics.utils.llm_as_judge import JudgeLM
 from lighteval.models.model_output import ModelResponse
 from lighteval.tasks.requests import Doc
-from lighteval.utils.utils import as_list, safe_divide
+from lighteval.utils.utils import as_list, safe_divide, split_reasoning
 
 
 logger = logging.getLogger(__name__)
@@ -95,6 +95,46 @@ class GenerationTruncated(SampleLevelComputation):
     def compute(self, model_response: ModelResponse, doc: Doc, **kwargs) -> float:
         flags = getattr(model_response, self.attribute, None) or []
         return (sum(1 for f in flags if f) / len(flags)) if flags else 0.0
+
+
+# Repetition-loop heuristic (ported from the OpenLLM-BPI truncation_loops analysis): the text ends in
+# a loop when its last W characters (W in 40/80/160/320) recur at least 3 times within its last 3000
+# characters. End-anchored and literal, so it is a lower bound (misses paraphrased loops).
+_LOOP_TAIL = 3000
+_LOOP_WINDOWS = (40, 80, 160, 320)
+_LOOP_MIN_REPEATS = 3
+
+
+def _ends_in_loop(text: str) -> bool:
+    tail = text[-_LOOP_TAIL:]
+    if len(tail) < 500:
+        return False
+    return any(tail.count(tail[-w:]) >= _LOOP_MIN_REPEATS for w in _LOOP_WINDOWS)
+
+
+class GenerationLoop(SampleLevelComputation):
+    """Fraction of a sample's generations whose reasoning or answer ends in a repetition loop.
+
+    The raw generation text is split on the first reasoning end tag (``</think>`` or ``[/THINK]``):
+    ``part="reasoning"`` checks the text before it, ``part="answer"`` the text after (or the whole
+    generation when there is no end tag). The loop test is the cheap end-anchored heuristic in
+    ``_ends_in_loop``. Uses the raw ``text`` (not the reasoning-stripped ``text_post_processed``) so
+    the reasoning is still available for ``part="reasoning"``. Aggregated with the mean.
+    """
+
+    def __init__(self, part: str = "answer"):
+        self.part = part
+
+    def compute(self, model_response: ModelResponse, doc: Doc, **kwargs) -> float:
+        texts = getattr(model_response, "text", None) or []
+        if not texts:
+            return 0.0
+        hits = []
+        for text in texts:
+            reasoning, answer = split_reasoning(str(text))
+            segment = reasoning if self.part == "reasoning" else answer
+            hits.append(1.0 if _ends_in_loop(segment) else 0.0)
+        return sum(hits) / len(hits)
 
 
 class ExactMatches(SampleLevelComputation):
