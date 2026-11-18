@@ -37,13 +37,12 @@ Row schema (one per example)
 
 Tasks
 -----
-One ``luciole_rag:<subset>`` task per subset (``hotpotqa``, ``hotpotqa_fr``,
-``hotpot_native_french``, ``tatqa``, ``piaf``, ``newsquadfr``,
-``squad2_fr_pragnakalp``, ``openrag_bench``). ``openrag_bench`` is the
-``reranked_gold`` split of OpenRAG Bench, read from the private ``luciole``
-config of ``OpenLLM-France/OpenRAG-Bench`` (needs a Hugging Face token with
-access to the organization); its 83 natural unanswerables come on top of the
-synthetic ones. Each subset also has a ``luciole_rag:<subset>_generic`` variant
+One ``luciole_rag:<subset>`` task per subset (``hotpotqa``,
+``hotpot_native_french``, ``tatqa``, ``newsquadfr``, ``openrag_bench``).
+``openrag_bench`` is the ``reranked_gold`` split of OpenRAG Bench, read from
+the private ``luciole`` config of ``OpenLLM-France/OpenRAG-Bench`` (needs a
+Hugging Face token with access to the organization); its 83 natural
+unanswerables come on top of the synthetic ones. Each subset also has a ``luciole_rag:<subset>_generic`` variant
 whose refusal rule asks to say that the documents do not allow an answer and to
 invite the user to rephrase, instead of imposing an exact refusal phrase; it
 measures the decision to refuse apart from obeying the phrase (judged refusal
@@ -664,7 +663,7 @@ def _shuffle_deterministic(items: list, seed_key: str) -> list:
 
 # Dropping the supporting chunks without replacing them made the synthetic
 # unanswerables shorter than the answerable rows: the chunk count alone told
-# them apart on 99.8% of hotpotqa rows (8 chunks vs 10) and on every piaf and
+# them apart on 99.8% of hotpotqa rows (8 chunks vs 10) and on every
 # newsquadfr row, without reading a word. Each dropped chunk is therefore
 # replaced by a non-supporting chunk of another row of the same split. A random
 # one would be off topic where the native distractors were retrieved for the
@@ -1380,18 +1379,15 @@ luciole_rag_refusal_judge = SampleLevelMetricGrouping(
 _ORG_REPO = "OpenLLM-France/Luciole_RAG_unformatted"
 _PERSONAL_REPO = "Mvanypersele/luciole_RAG"
 # Where each subset is published: (repo, config, revision). The subsets in
-# Luciole_RAG_unformatted are byte-identical copies of the personal repo's; the
-# others stay there, since newsquadfr (CC BY-NC-SA) cannot join that repo's
-# CC BY-SA license. openrag_bench mixes licenses, some non-commercial, so it
+# Luciole_RAG_unformatted are byte-identical copies of the personal repo's.
+# hotpot_native_french is not published there, and newsquadfr (CC BY-NC-SA)
+# cannot join that repo's CC BY-SA license. openrag_bench mixes licenses, some non-commercial, so it
 # lives in the private OpenRAG-Bench repo, pinned to the commit that added it.
 DATASET_SOURCES = {
     "hotpotqa": (_ORG_REPO, "hotpotqa", None),
-    "hotpotqa_fr": (_PERSONAL_REPO, "hotpotqa_fr", None),
     "hotpot_native_french": (_PERSONAL_REPO, "hotpot_native_french", None),
     "tatqa": (_ORG_REPO, "tatqa", None),
-    "piaf": (_PERSONAL_REPO, "piaf", None),
     "newsquadfr": (_PERSONAL_REPO, "newsquadfr", None),
-    "squad2_fr_pragnakalp": (_PERSONAL_REPO, "squad2_fr_pragnakalp", None),
     "openrag_bench": ("OpenLLM-France/OpenRAG-Bench", "luciole", "1ac3766a9f916cff04e4c739c070d06cb6b1e1eb"),
 }
 # Reads every subset but openrag_bench from one repo instead, e.g. a local copy.
@@ -1399,12 +1395,9 @@ HF_REPO = os.getenv("LUCIOLE_RAG_HF_REPO")
 
 DATASET_SUBSETS = [
     "hotpotqa",
-    "hotpotqa_fr",
     "hotpot_native_french",
     "tatqa",
-    "piaf",
     "newsquadfr",
-    "squad2_fr_pragnakalp",
     "openrag_bench",
 ]
 
@@ -1412,23 +1405,17 @@ DATASET_SUBSETS = [
 # back to "validation" for subsets that only ship train+validation.
 DATASET_EVAL_SPLITS = {
     "hotpotqa": "validation",
-    "hotpotqa_fr": "test",
     "hotpot_native_french": "test",
     "tatqa": "test",
-    "piaf": "test",
     "newsquadfr": "test",
-    "squad2_fr_pragnakalp": "test",
     "openrag_bench": "test",
 }
 
 DATASET_AVAIL_SPLITS = {
     "hotpotqa": ["train", "validation"],
-    "hotpotqa_fr": ["train", "test"],
     "hotpot_native_french": ["test"],
     "tatqa": ["train", "validation", "test"],
-    "piaf": ["train", "test"],
     "newsquadfr": ["train", "validation", "test"],
-    "squad2_fr_pragnakalp": ["train", "test"],
     "openrag_bench": ["test"],
 }
 
