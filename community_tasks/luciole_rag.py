@@ -91,6 +91,18 @@ unambiguous. ``citation_*_fuzzy`` credits a cited number alone;
 ``citation_*_strict`` also requires every excerpt quoted under that number to
 appear verbatim in the chunk (case, spacing and ``...`` elisions aside).
 
+Answer metrics
+--------------
+``answer_em`` and ``answer_em_fuzzy`` read the whole response, the excerpts
+quoted in ``<ref>`` tags included. A quoted supporting chunk usually holds the
+answer, so a citing model can score a hit while stating a wrong value: "$19.1
+million <ref id="1">... increased by $8.7 million ...</ref>" matches gold
+"$8.7 million". Dropping the excerpts was measured on 29 saved runs and not
+kept: tatqa hits fell from 1331 to 1025, but 237 of the 308 lost hits were
+sentence-long golds that the response paraphrases correctly and only the quote
+states verbatim. Read answer_em as "the response contains the gold", quotes
+included, and use the factual judge for correctness.
+
 Responses are stripped of ``<think>`` reasoning traces before scoring; see
 ``strip_reasoning``.
 
@@ -424,7 +436,9 @@ def compute_answer_em(response: str, gold_answer: str, *, language: str = "en") 
     match when their normalized text appears in the normalized response as
     a whole-word sequence. Both avoid the bare substring test, which
     credited gold "no" inside "not"/"cannot" (so refusals scored on yes/no
-    questions) and gold "5" inside "85".
+    questions) and gold "5" inside "85". Excerpts quoted in ``<ref>`` tags
+    count as part of the response (see "Answer metrics" in the module
+    docstring).
     """
     if not gold_answer:
         return 0.0
