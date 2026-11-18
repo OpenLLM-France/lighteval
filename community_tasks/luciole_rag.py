@@ -42,18 +42,19 @@ One ``luciole_rag:<subset>`` task per subset (``hotpotqa``,
 ``openrag_bench`` is the ``reranked_gold`` split of OpenRAG Bench, read from
 the private ``luciole`` config of ``OpenLLM-France/OpenRAG-Bench`` (needs a
 Hugging Face token with access to the organization); its 83 natural
-unanswerables come on top of the synthetic ones. Each subset also has a ``luciole_rag:<subset>_generic`` variant
-whose refusal rule asks to say that the documents do not allow an answer and to
-invite the user to rephrase, instead of imposing an exact refusal phrase; it
-measures the decision to refuse apart from obeying the phrase (judged refusal
-metrics only). A deterministic
-md5-based partition on the row id drops the supporting chunks on a fraction of
-the answerable rows, turning them into synthetic unanswerables. Each dropped
-chunk is replaced by a non-supporting chunk of another row of the same split,
+unanswerables come on top of the synthetic ones. Each subset also has a
+``luciole_rag:<subset>_generic`` variant whose refusal rule asks to say that
+the documents do not allow an answer and to invite the user to rephrase,
+instead of imposing an exact refusal phrase; it measures the decision to
+refuse apart from obeying the phrase, so it has no ``refusal_format_*``
+metrics and measures refusals only with the judge. A deterministic md5-based
+partition on the row id drops the supporting chunks on a fraction of the
+answerable rows, turning them into synthetic unanswerables. Each dropped chunk
+is replaced by a non-supporting chunk of another row of the same split,
 related to the question and of similar length, so that neither the chunk count
-nor the context length gives the synthetic unanswerables away. The fraction
-is set by ``LUCIOLE_RAG_DROP_RATIO`` (default 0.5). With ratio 0.0 the run
-is pure answerable; with 1.0 it is pure unanswerable. One run fills both the
+nor the context length gives the synthetic unanswerables away. The fraction is
+set by ``LUCIOLE_RAG_DROP_RATIO`` (default 0.5). With ratio 0.0 the run is
+pure answerable; with 1.0 it is pure unanswerable. One run fills both the
 answer/citation metrics (on kept rows) and the refusal metrics (on dropped
 rows).
 
@@ -548,9 +549,8 @@ REFUSAL_INSTRUCTION = {
 
 # Generic refusal rule, the default one of the training data: no imposed
 # phrase. Used by the "<subset>_generic" task variants, which separate obeying
-# the imposed phrase from deciding to refuse. Only the judged refusal metrics
-# are meaningful there; the refusal_format_* metrics still look for the strict
-# phrase.
+# the imposed phrase from deciding to refuse: they measure refusals with the
+# judge only, without the refusal_format_* metrics.
 GENERIC_REFUSAL_INSTRUCTION = (
     "If the retrieved documents are **insufficient** to answer the question, state that the retrieved documents "
     "do not allow you to answer and invite the user to rephrase the query or add relevant documents."
@@ -920,6 +920,10 @@ _SAMPLE_METRIC_NAMES = [
     "false_refusal_format_rate",
 ]
 
+# Pattern-based refusal metrics: they look for the strict refusal phrase, so
+# the "<subset>_generic" variants, whose rule imposes no phrase, leave them out.
+_REFUSAL_FORMAT_METRIC_NAMES = ["refusal_format_compliance", "refusal_format_precision", "false_refusal_format_rate"]
+
 
 class LucioleRagSampleMetrics(SampleLevelComputation):
     """Per-sample metrics with answerability-conditional gating.
@@ -932,9 +936,18 @@ class LucioleRagSampleMetrics(SampleLevelComputation):
     On unanswerable rows: citation/quality metrics are None (skipped); refusal_format_compliance
     is 1 iff refused; false_refusal_format_rate is None; refusal_format_precision contributes 1
     if refused, None otherwise.
+
+    Only the metrics in ``metric_names`` are returned.
     """
 
+    def __init__(self, metric_names: list[str] = _SAMPLE_METRIC_NAMES):
+        self.metric_names = list(metric_names)
+
     def compute(self, model_response, doc, **kwargs):
+        scores = self._scores(model_response, doc)
+        return {name: scores[name] for name in self.metric_names}
+
+    def _scores(self, model_response, doc):
         spec = doc.specific or {}
         gold_ids = [int(n) for n in spec.get("supporting_chunk_ids", []) or []]
         chunks = list(spec.get("chunk_documents", []) or [])
@@ -1004,12 +1017,19 @@ _HIGHER_IS_BETTER = {
 }
 
 
-luciole_rag_sample_metrics = SampleLevelMetricGrouping(
-    metric_name=_SAMPLE_METRIC_NAMES,
-    higher_is_better=_HIGHER_IS_BETTER,
-    category=SamplingMethod.GENERATIVE,
-    sample_level_fn=LucioleRagSampleMetrics(),
-    corpus_level_fn=_rag_corpus_aggregators(_SAMPLE_METRIC_NAMES),
+def _sample_metrics(metric_names: list[str]) -> SampleLevelMetricGrouping:
+    return SampleLevelMetricGrouping(
+        metric_name=metric_names,
+        higher_is_better={name: _HIGHER_IS_BETTER[name] for name in metric_names},
+        category=SamplingMethod.GENERATIVE,
+        sample_level_fn=LucioleRagSampleMetrics(metric_names),
+        corpus_level_fn=_rag_corpus_aggregators(metric_names),
+    )
+
+
+luciole_rag_sample_metrics = _sample_metrics(_SAMPLE_METRIC_NAMES)
+luciole_rag_generic_sample_metrics = _sample_metrics(
+    [name for name in _SAMPLE_METRIC_NAMES if name not in _REFUSAL_FORMAT_METRIC_NAMES]
 )
 
 
@@ -1428,10 +1448,11 @@ DATASET_AVAIL_SPLITS = {
 # LLM-as-judge factual scoring is opt-in (adds one API call per answerable
 # sample). Enable with LUCIOLE_RAG_USE_JUDGE=1.
 _USE_JUDGE = os.getenv("LUCIOLE_RAG_USE_JUDGE", "0").strip().lower() in ("1", "true", "yes", "on")
-_RAG_METRICS = [luciole_rag_sample_metrics]
-if _USE_JUDGE:
-    _RAG_METRICS.append(luciole_rag_factual_judge)
-    _RAG_METRICS.append(luciole_rag_refusal_judge)
+_JUDGE_METRICS = [luciole_rag_factual_judge, luciole_rag_refusal_judge] if _USE_JUDGE else []
+_RAG_METRICS = {
+    "strict": [luciole_rag_sample_metrics, *_JUDGE_METRICS],
+    "generic": [luciole_rag_generic_sample_metrics, *_JUDGE_METRICS],
+}
 
 
 # Max new tokens per generation. 2048 fits instruct models; reasoning models
@@ -1480,7 +1501,7 @@ def _make_task(subset: str, refusal_rule: str = "strict") -> LightevalTaskConfig
         evaluation_splits=[evaluation_split],
         few_shots_split=None,
         few_shots_select=None,
-        metrics=_RAG_METRICS,
+        metrics=_RAG_METRICS[refusal_rule],
         generation_size=GENERATION_SIZE,
         stop_sequence=[],
         version=3,

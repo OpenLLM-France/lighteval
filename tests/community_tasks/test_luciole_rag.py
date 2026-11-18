@@ -345,3 +345,15 @@ def test_convert_openrag_row():
     }
     unanswerable = convert_row({**row, "answerable": False, "contexts": [chunk("a", "x.pdf", "distractor")]})
     assert (unanswerable["supporting_index"], unanswerable["answer"]) == ([], "")
+
+
+def test_generic_variants_have_no_refusal_format_metrics():
+    tasks = {t.name: t for t in luciole_rag.TASKS_TABLE}
+    strict_names = [n for m in tasks["luciole_rag:tatqa"].metrics for n in m.metric_name]
+    generic_names = [n for m in tasks["luciole_rag:tatqa_generic"].metrics for n in m.metric_name]
+    assert "refusal_format_compliance" in strict_names
+    assert not set(luciole_rag._REFUSAL_FORMAT_METRIC_NAMES) & set(generic_names)
+    doc = SimpleNamespace(specific={"is_unanswerable": True})
+    response = SimpleNamespace(final_text=[luciole_rag.REFUSAL_PHRASE["en"]])
+    generic_metrics = tasks["luciole_rag:tatqa_generic"].metrics[0].sample_level_fn
+    assert set(generic_metrics.compute(response, doc)) == set(generic_names)
