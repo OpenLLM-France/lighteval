@@ -215,10 +215,27 @@ def test_context_numbers_chunks_in_presentation_order(monkeypatch):
     rows = _rag_rows(("q1", ["Byron", "Ada Lovelace"], ["b", "Ada was born in London."], [1], "London"))
     doc = luciole_rag.luciole_rag_prompt(_row(rows, 0))
     assert doc.specific["context"] == (
-        "[1] filename: Byron\n\n[CHUNK_START]\nb\n[CHUNK_END]\n----------\n\n"
-        "[2] filename: Ada Lovelace\n\n[CHUNK_START]\nAda was born in London.\n[CHUNK_END]"
+        "<documents>\n"
+        '<document id="1" filename="Byron">\nb\n</document>\n'
+        '<document id="2" filename="Ada Lovelace">\nAda was born in London.\n</document>\n'
+        "</documents>"
     )
+    assert doc.instruction.endswith("Here are the retrieved documents:\n\n" + doc.specific["context"])
     assert doc.specific["supporting_chunk_ids"] == [2]
+
+
+def test_filename_is_escaped_like_the_training_data():
+    context = luciole_rag.build_context(['AT&T "Inc" l\'entreprise'], ["a & b"])
+    assert '<document id="1" filename="AT&amp;T &quot;Inc&quot; l\'entreprise">\na & b\n</document>' in context
+
+
+def test_system_prompt_is_english_with_a_language_matched_refusal_phrase():
+    fr = luciole_rag.build_system_prompt("<documents>\n</documents>", "fr")
+    assert fr.startswith("You are an AI conversational assistant")
+    assert f'respond exactly with: "{luciole_rag.REFUSAL_PHRASE["fr"]}"' in fr
+    generic = luciole_rag.build_system_prompt("<documents>\n</documents>", "fr", "generic")
+    assert "invite the user to rephrase the query or add relevant documents." in generic
+    assert "respond exactly" not in generic
 
 
 def test_strict_citations_require_a_verbatim_excerpt():

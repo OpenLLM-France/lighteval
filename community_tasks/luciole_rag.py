@@ -60,17 +60,19 @@ rows).
 
 Prompt
 ------
-Built per row in the format of the ``Mvanypersele/luciole_RAG_formated``
-training data: chunks are numbered ``[N] filename: title`` and delimited by
-``[CHUNK_START]``/``[CHUNK_END]``, with a single citation rule (each quoted
-excerpt is wrapped inline in ``<ref id="N">...</ref>``, copied verbatim from
-chunk ``N``) and a single refusal rule that instructs the model to reply with
-one **canonical refusal phrase** verbatim. Detection of refusal is lenient:
-it matches the shorter invariant core of the canonical phrase (e.g. ``do not
-allow me to answer`` / ``ne permettent pas de répondre``), so common
-paraphrases of the prefix ("The provided context...", "The available/retrieved
-documents...") still count as refusals. The prompt language (FR/EN) is
-detected per row from the query.
+Built per row in the format of the ``sft_mix_1112`` config of
+``OpenLLM-France/Luciole_RAG``, the training data: an English system prompt
+for every row, French ones included, holding the rules, then the chunks in XML
+(``<documents>``, one ``<document id="N" filename="title">`` per chunk,
+numbered from 1). It has a single citation rule (each quoted excerpt is
+wrapped inline in ``<ref id="N">...</ref>``, copied verbatim from document
+``N``) and a single refusal rule that instructs the model to reply with one
+**canonical refusal phrase** verbatim, in the language of the question.
+Detection of refusal is lenient: it matches the shorter invariant core of the
+canonical phrase (e.g. ``do not allow me to answer`` / ``ne permettent pas de
+répondre``), so common paraphrases of the prefix ("The provided context...",
+"The available/retrieved documents...") still count as refusals. The language of the refusal phrase
+(FR/EN) is detected per row from the query.
 
 Refusal metrics
 ---------------
@@ -103,7 +105,8 @@ a refusal 1 in the factual judge when the judge leaves it off the scale. It
 also replaces the supporting chunks dropped from synthetic unanswerables
 instead of only removing them, and numbers the chunks so that citations name a
 chunk number (``<ref id="N">``) rather than a title, with strict citation
-metrics checking the quoted excerpt.
+metrics checking the quoted excerpt. The prompt follows the training data
+(English rules, XML documents) for every row.
 Scores are not directly comparable across versions; rerun both models under
 the same protocol/settings.
 Generation budget, drop ratio, judge model/backend and reasoning stripping
@@ -522,58 +525,47 @@ def _parse_refused(parsed: dict) -> bool:
 
 # ── prompt-building primitives ─────────────────────────────────────
 
-# Wording of the Mvanypersele/luciole_RAG_formated training data, so that
+# Wording of the sft_mix_1112 config of OpenLLM-France/Luciole_RAG, so that
 # models fine-tuned on it are evaluated on the prompt they were trained on.
-CITATION_INSTRUCTION = {
-    "en": (
-        'When quoting from the context, wrap each excerpt inline with `<ref id="N">excerpt</ref>`, '
-        "where `N` is the number of the cited document (the `[N]` before its filename) "
-        "and `excerpt` is copied verbatim from that document."
-    ),
-    "fr": (
-        'Lorsque vous citez le contexte, encadrez chaque extrait en ligne avec `<ref id="N">extrait</ref>`, '
-        "où `N` est le numéro du document cité (le `[N]` devant son nom de fichier) "
-        "et `extrait` est recopié mot pour mot depuis ce document."
-    ),
-}
+# The system prompt is in English for every row, French ones included, as in
+# the training data: the language rule asks to answer in the language of the
+# question.
+CITATION_INSTRUCTION = (
+    'When quoting from the retrieved documents, wrap each excerpt inline with `<ref id="N">excerpt</ref>`, '
+    "where `N` is the `id` of the cited `<document>` and `excerpt` is copied verbatim from that document. "
+    'From a table, quote the row you use as it is written, e.g. `<ref id="N">| Revenue | 1,234 | 1,100 |</ref>`, '
+    "and give any value you compute from it after the tag."
+)
 
+# Strict refusal rule: the training data words it the same way, with one of
+# five phrases per language; the evaluation dictates the language-matched
+# REFUSAL_PHRASE, which the refusal_format_* metrics look for.
 REFUSAL_INSTRUCTION = {
-    "en": (
-        "If the context is **insufficient** to answer the question, reply "
-        f"**exactly** with: `{REFUSAL_PHRASE['en']}` and nothing else."
-    ),
-    "fr": (
-        "Si le contexte est **insuffisant** pour répondre à la question, "
-        f"répondez **exactement** par : `{REFUSAL_PHRASE['fr']}` et rien d'autre."
-    ),
+    language: (
+        f'If the retrieved documents are **insufficient** to answer the question, respond exactly with: "{phrase}"'
+    )
+    for language, phrase in REFUSAL_PHRASE.items()
 }
 
-# Generic refusal rule, worded as in the Luciole RAG SFT data and the OpenRAG
-# inference prompt: no imposed phrase. Used by the "<subset>_generic" task
-# variants, which separate obeying the imposed phrase from deciding to refuse.
-# Only the judged refusal metrics are meaningful there; the refusal_format_*
-# metrics still look for the strict phrase.
-GENERIC_REFUSAL_INSTRUCTION = {
-    "en": (
-        "If the context is **insufficient** to answer the question, state that the retrieved documents "
-        "do not allow you to answer and invite the user to rephrase the query or add relevant documents."
-    ),
-    "fr": (
-        "Si le contexte est **insuffisant** pour répondre à la question, indiquez que les documents récupérés "
-        "ne permettent pas de répondre et invitez l'utilisateur à reformuler sa requête ou à ajouter des documents pertinents."
-    ),
-}
-REFUSAL_INSTRUCTIONS = {"strict": REFUSAL_INSTRUCTION, "generic": GENERIC_REFUSAL_INSTRUCTION}
+# Generic refusal rule, the default one of the training data: no imposed
+# phrase. Used by the "<subset>_generic" task variants, which separate obeying
+# the imposed phrase from deciding to refuse. Only the judged refusal metrics
+# are meaningful there; the refusal_format_* metrics still look for the strict
+# phrase.
+GENERIC_REFUSAL_INSTRUCTION = (
+    "If the retrieved documents are **insufficient** to answer the question, state that the retrieved documents "
+    "do not allow you to answer and invite the user to rephrase the query or add relevant documents."
+)
 
-SYSTEM_PROMPT_EN = (
+SYSTEM_PROMPT = (
     "You are an AI conversational assistant specialized in **information retrieval and synthesis**.\n"
-    "Your goal is to provide **precise, reliable, and well-structured answers** using **only the retrieved documents** (`Context`).\n"
+    "Your goal is to provide **precise, reliable, and well-structured answers** using **only the retrieved documents**.\n"
     "Prioritize **clarity, accuracy, and completeness** in your responses.\n"
     "\n"
     "## Rules\n"
     "\n"
-    "1. Use only the provided Context\n"
-    "   * Base your answer **exclusively** on the information contained in the `Context`.\n"
+    "1. Use only the retrieved documents\n"
+    "   * Base your answer **exclusively** on the information contained in the retrieved documents.\n"
     "   * **Never infer**, assume, or rely on any external knowledge.\n"
     "   * {refusal_instruction}\n"
     "   * {citation_instruction}\n"
@@ -584,32 +576,17 @@ SYSTEM_PROMPT_EN = (
     "3. Structure and Readability\n"
     "   * Ensure responses are **concise yet complete**, avoiding omission of key details.\n"
     "\n"
-    "Here are the retrieved documents : `{context}`"
+    "Here are the retrieved documents:\n"
+    "\n"
+    "{context}"
 )
 
-SYSTEM_PROMPT_FR = (
-    "Vous êtes un assistant conversationnel IA spécialisé dans la **recherche et la synthèse d'informations**.\n"
-    "Votre objectif est de fournir des **réponses précises, fiables et bien structurées** en utilisant **uniquement les documents récupérés** (`Contexte`).\n"
-    "Privilégiez la **clarté, l'exactitude et l'exhaustivité** dans vos réponses.\n"
-    "\n"
-    "## Règles\n"
-    "\n"
-    "1. Utilisez uniquement le Contexte fourni\n"
-    "   * Basez votre réponse **exclusivement** sur les informations contenues dans le `Contexte`.\n"
-    "   * **N'inférez jamais**, ne supposez pas et ne vous appuyez pas sur des connaissances externes.\n"
-    "   * {refusal_instruction}\n"
-    "   * {citation_instruction}\n"
-    "\n"
-    "2. Cohérence linguistique\n"
-    "   * Répondez toujours **dans la même langue** que la requête de l'utilisateur.\n"
-    "\n"
-    "3. Structure et lisibilité\n"
-    "   * Assurez-vous que les réponses sont **concises mais complètes**, en évitant d'omettre les détails clés.\n"
-    "\n"
-    "Voici les documents récupérés : `{context}`"
-)
 
-SYSTEM_PROMPTS = {"en": SYSTEM_PROMPT_EN, "fr": SYSTEM_PROMPT_FR}
+def build_system_prompt(context: str, language: str, refusal_rule: str = "strict") -> str:
+    refusal = REFUSAL_INSTRUCTION[language] if refusal_rule == "strict" else GENERIC_REFUSAL_INSTRUCTION
+    return SYSTEM_PROMPT.format(
+        context=context, refusal_instruction=refusal, citation_instruction=CITATION_INSTRUCTION
+    )
 
 
 # ── language detection ─────────────────────────────────────────────
@@ -625,23 +602,29 @@ _FRENCH_HINT_RE = re.compile(
 
 
 def detect_language(text: str) -> str:
-    """Cheap FR/EN classifier used to pick the system-prompt template."""
+    """Cheap FR/EN classifier used to pick the refusal phrase and number conventions."""
     return "fr" if _FRENCH_HINT_RE.search(text or "") else "en"
 
 
 # ── context formatting ────────────────────────────────────────────
 
 
+def _escape_attribute(value: str) -> str:
+    """Escape a ``filename`` attribute as the training data does: ``&``, ``"``,
+    ``<`` and ``>``, not ``'``. Document text is left as is.
+    """
+    return value.replace("&", "&amp;").replace('"', "&quot;").replace("<", "&lt;").replace(">", "&gt;")
+
+
 def _format_chunk(number: int, title: str, document: str) -> str:
-    """Emit a chunk as ``[N] filename: title`` followed by its delimited content."""
-    return f"[{number}] filename: {title}\n\n[CHUNK_START]\n{document}\n[CHUNK_END]"
+    """Emit a chunk as ``<document id="N" filename="title">``, its text on the following lines."""
+    return f'<document id="{number}" filename="{_escape_attribute(title)}">\n{document}\n</document>'
 
 
 def build_context(titles: list[str], documents: list[str]) -> str:
     """Number the chunks from 1 in the order given: ``<ref id="N">`` cites chunk N."""
-    return "\n----------\n\n".join(
-        _format_chunk(n, str(t), str(d)) for n, (t, d) in enumerate(zip(titles, documents), start=1)
-    )
+    chunks = (_format_chunk(n, str(t), str(d)) for n, (t, d) in enumerate(zip(titles, documents), start=1))
+    return "<documents>\n" + "\n".join(chunks) + "\n</documents>"
 
 
 # ── prompt function ────────────────────────────────────────────────
@@ -860,13 +843,8 @@ def luciole_rag_prompt(
         is_unanswerable = len(support_set) == 0
         reference_answer = answer
 
-    template = SYSTEM_PROMPTS.get(language, SYSTEM_PROMPT_EN)
     context = build_context(kept_titles, kept_documents)
-    system_content = template.format(
-        context=context,
-        citation_instruction=CITATION_INSTRUCTION[language],
-        refusal_instruction=REFUSAL_INSTRUCTIONS[refusal_rule][language],
-    )
+    system_content = build_system_prompt(context, language, refusal_rule)
 
     return Doc(
         task_name=task_name or "",
