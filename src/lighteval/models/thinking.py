@@ -163,9 +163,11 @@ def ensure_reasoning_tags_decodable(
 class ThinkingGenSample:
     """One generated sample as returned by a backend's ``generate_fn``.
 
-    ``text`` and ``token_ids`` must be *consistent* and must **exclude** the stop sequence
-    (``</think>``): the orchestrator appends the closing tag itself, exactly once, so a
-    generate_fn that leaves the stop string in would double it.
+    ``text`` and ``token_ids`` should be *consistent* and should **exclude** the stop sequence
+    (``</think>``): the orchestrator appends the closing tag itself, exactly once. A backend that
+    leaves a trailing end tag in either field (e.g. vLLM keeps the stop token in ``token_ids`` while
+    stripping it from ``text``) is tolerated: the orchestrator strips one trailing end tag before
+    re-appending, so the tag ends up present exactly once in both fields.
 
     ``ended_at_eos`` is True when phase-1 generation stopped because the model emitted EOS (it ended
     its turn), as opposed to stopping at the reasoning end tag or the thinking budget. A backend that
@@ -371,13 +373,23 @@ def two_phase_generate(
             reasoning_truncated.append(False)
             phase2_index.append(None)
         else:
-            # generate_fn returns text/tokens without the end-tag stop: close it explicitly (this
-            # also closes a reasoning that hit the budget without ever emitting the end tag).
-            text = sample.text + end_tag
-            tokens = list(sample.token_ids) + close_tag_ids
+            # generate_fn is expected to return text/tokens without the end-tag stop; the orchestrator
+            # re-appends it exactly once (this also closes a reasoning that hit the budget without ever
+            # emitting the end tag). Some backends violate that contract: vLLM stopping on the end tag's
+            # token id strips the tag from the decoded text but leaves its token in token_ids, which
+            # would double the tag here and, worse, condition the answer phase on "</think></think>"
+            # (an out-of-distribution context that changes the generated answer). Strip a trailing end
+            # tag from both text and tokens first, so it is present exactly once in each.
+            raw_tokens = list(sample.token_ids)
+            if close_tag_ids and raw_tokens[-len(close_tag_ids) :] == close_tag_ids:
+                raw_tokens = raw_tokens[: -len(close_tag_ids)]
+            raw_text = sample.text[: -len(end_tag)] if (end_tag and sample.text.endswith(end_tag)) else sample.text
+            text = raw_text + end_tag
+            tokens = raw_tokens + close_tag_ids
             thinking_texts.append(text)
             thinking_tokens.append(tokens)
             # Reasoning ran out of budget (no natural </think>, no EOS) -> the generation was cut off.
+            # Use the original (pre-strip) phase-1 length, which is what the budget was measured against.
             reasoning_truncated.append(len(sample.token_ids) >= thinking_budget)
             phase2_index.append(len(phase2_inputs))
             phase2_inputs.append(list(inputs[i]) + tokens)
