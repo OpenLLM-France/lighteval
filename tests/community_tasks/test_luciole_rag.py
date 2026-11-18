@@ -257,7 +257,10 @@ def test_strict_citations_require_a_verbatim_excerpt():
 def test_answer_em_stays_fast_on_degenerate_markup_loops():
     import time
 
-    response = "A decrease of $4,001,000" + " <br>" * 2000
+    # The loop must not follow a number: the number's match would take the
+    # whole whitespace run, with no backtracking. Without whitespace
+    # collapsing, these 80 "<br>" take over 10 s; with it, under 1 ms.
+    response = "Americas:" + " <br>" * 80 + " A decrease of $4,001,000"
     start = time.perf_counter()
     assert luciole_rag.compute_answer_em(response, "4,001,000") == 1.0
     assert time.perf_counter() - start < 1.0
