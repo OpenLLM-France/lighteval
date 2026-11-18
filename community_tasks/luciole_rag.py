@@ -108,17 +108,25 @@ Responses are stripped of ``<think>`` reasoning traces before scoring; see
 
 Protocol version
 ----------------
-Version 2 changes answer matching (markup removal, whole words, signed numeric
-values and explicit scales), scores missing expected citations as F1=0, removes
-``distractor_citation_rate``, rejects invalid judge refusal flags, and grades
-the final answer rather than a reasoning trace. Version 3 matches numeric
-golds regardless of sign and of a scale word following the number, and scores
-a refusal 1 in the factual judge when the judge leaves it off the scale. It
-also replaces the supporting chunks dropped from synthetic unanswerables
-instead of only removing them, and numbers the chunks so that citations name a
-chunk number (``<ref id="N">``) rather than a title, with strict citation
-metrics checking the quoted excerpt. The prompt follows the training data
-(English rules, XML documents) for every row.
+Version 2 changes, compared with version 1:
+
+- prompt: the layout of the training data, with English rules, the chunks as
+  numbered XML documents and citations by document number (``<ref id="N">``);
+- synthetic unanswerables: each dropped supporting chunk is replaced by a
+  related non-supporting chunk of another row, instead of only being removed;
+- answer matching: markup removed (the text of ``<ref>`` excerpts is kept),
+  whole words only, and numeric golds compared by value regardless of sign and
+  of a scale word following the number;
+- citations: scored on chunk numbers, with strict metrics checking the quoted
+  excerpt; F1 is 0 when expected sources are not cited;
+  ``distractor_citation_rate`` is removed;
+- judges: an unreadable refusal flag drops the row instead of counting as no
+  refusal, the factual judge grades the final answer rather than a reasoning
+  trace, and a refusal it leaves off the scale scores 1;
+- subsets: ``hotpot_native_french`` and ``openrag_bench`` added,
+  ``hotpotqa_fr``, ``piaf`` and ``squad2_fr_pragnakalp`` removed, every
+  dataset pinned to a commit; ``<subset>_generic`` variants added.
+
 Scores are not directly comparable across versions; rerun both models under
 the same protocol/settings.
 Generation budget, drop ratio, judge model/backend and reasoning stripping
@@ -1412,9 +1420,8 @@ luciole_rag_refusal_judge = SampleLevelMetricGrouping(
 
 _ORG_REPO = "OpenLLM-France/Luciole_RAG_unformatted"
 _PERSONAL_REPO = "Mvanypersele/luciole_RAG"
-# Commits the protocol version 3 was run on, so that a later update of a
-# dataset cannot change the scores under the same task version. Neither repo
-# has changed since the subsets moved to them on 2026-10-23.
+# Dataset commits the task reads, so that a later update of a dataset cannot
+# change the scores under the same task version.
 _ORG_REVISION = "d14e8a535a963a2910f5ca59b23845924a1b4734"
 _PERSONAL_REVISION = "5c051d70aee38aceb590404dd85bfffc986d9d17"
 # Where each subset is published: (repo, config, revision). The subsets in
@@ -1518,7 +1525,7 @@ def _make_task(subset: str, refusal_rule: str = "strict") -> LightevalTaskConfig
         metrics=_RAG_METRICS[refusal_rule],
         generation_size=GENERATION_SIZE,
         stop_sequence=[],
-        version=3,
+        version=2,
     )
 
 
