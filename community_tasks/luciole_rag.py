@@ -1378,16 +1378,22 @@ luciole_rag_refusal_judge = SampleLevelMetricGrouping(
 
 _ORG_REPO = "OpenLLM-France/Luciole_RAG_unformatted"
 _PERSONAL_REPO = "Mvanypersele/luciole_RAG"
+# Commits the protocol version 3 was run on, so that a later update of a
+# dataset cannot change the scores under the same task version. Neither repo
+# has changed since the subsets moved to them on 2026-10-23.
+_ORG_REVISION = "d14e8a535a963a2910f5ca59b23845924a1b4734"
+_PERSONAL_REVISION = "5c051d70aee38aceb590404dd85bfffc986d9d17"
 # Where each subset is published: (repo, config, revision). The subsets in
 # Luciole_RAG_unformatted are byte-identical copies of the personal repo's.
 # hotpot_native_french is not published there, and newsquadfr (CC BY-NC-SA)
 # cannot join that repo's CC BY-SA license. openrag_bench mixes licenses, some non-commercial, so it
 # lives in the private OpenRAG-Bench repo, pinned to the commit that added it.
+# LUCIOLE_RAG_HF_REPO (below) reads the other subsets unpinned.
 DATASET_SOURCES = {
-    "hotpotqa": (_ORG_REPO, "hotpotqa", None),
-    "hotpot_native_french": (_PERSONAL_REPO, "hotpot_native_french", None),
-    "tatqa": (_ORG_REPO, "tatqa", None),
-    "newsquadfr": (_PERSONAL_REPO, "newsquadfr", None),
+    "hotpotqa": (_ORG_REPO, "hotpotqa", _ORG_REVISION),
+    "hotpot_native_french": (_PERSONAL_REPO, "hotpot_native_french", _PERSONAL_REVISION),
+    "tatqa": (_ORG_REPO, "tatqa", _ORG_REVISION),
+    "newsquadfr": (_PERSONAL_REPO, "newsquadfr", _PERSONAL_REVISION),
     "openrag_bench": ("OpenLLM-France/OpenRAG-Bench", "luciole", "1ac3766a9f916cff04e4c739c070d06cb6b1e1eb"),
 }
 # Reads every subset but openrag_bench from one repo instead, e.g. a local copy.

@@ -314,6 +314,7 @@ def test_every_subset_has_a_source():
     openrag = tasks["luciole_rag:openrag_bench"]
     assert (openrag.hf_repo, openrag.hf_subset) == ("OpenLLM-France/OpenRAG-Bench", "luciole")
     assert openrag.hf_revision
+    assert all(revision for _, _, revision in luciole_rag.DATASET_SOURCES.values())
 
 
 def test_convert_openrag_row():
