@@ -28,7 +28,7 @@ from enum import Enum
 from itertools import cycle
 from typing import TYPE_CHECKING
 
-from lighteval.tasks.requests import Doc
+from lighteval.tasks.requests import Doc, SamplingMethod
 from lighteval.utils.utils import as_list
 
 
@@ -53,6 +53,24 @@ class PromptManager:
         self.system_prompt = system_prompt  # System prompt to be used in chat templates
         self.enable_thinking = enable_thinking
         self.chat_template_kwargs = chat_template_kwargs  # extra kwargs forwarded to apply_chat_template
+
+    def _chat_template_kwargs(self, doc: Doc | None = None) -> dict:
+        """Extra kwargs forwarded to ``apply_chat_template`` for ``doc``.
+
+        Thinking is forced off for non-generative tasks (loglikelihood, perplexity). There the model
+        does not generate: the candidate continuations are *scored*. An open ``<think>`` in the
+        generation prompt would make each scored continuation (e.g. an MCQ choice) the start of the
+        reasoning rather than the answer, so the choice must instead be scored as the answer.
+        """
+        enable_thinking = self.enable_thinking
+        if doc is not None and doc.sampling_methods and SamplingMethod.GENERATIVE not in doc.sampling_methods:
+            enable_thinking = False
+        kwargs = {}
+        if enable_thinking is not None:
+            kwargs["enable_thinking"] = enable_thinking
+        if self.chat_template_kwargs:
+            kwargs.update(self.chat_template_kwargs)
+        return kwargs
 
     def prepare_prompt(self, doc: Doc) -> str:
         """Prepare a prompt from a document, either using chat template or plain text format.
@@ -88,16 +106,11 @@ class PromptManager:
         else:
             message = [message]
 
-        kwargs = {}
-        if self.enable_thinking is not None:
-            kwargs["enable_thinking"] = self.enable_thinking
-        if self.chat_template_kwargs:
-            kwargs.update(self.chat_template_kwargs)
         return self.tokenizer.apply_chat_template(
             message,
             tokenize=False,
             add_generation_prompt=True,
-            **kwargs,
+            **self._chat_template_kwargs(doc),
         )
 
     def prepare_prompt_api(self, doc: Doc) -> list[dict[str, str]]:
@@ -165,12 +178,12 @@ class PromptManager:
         messages.append({"role": "user", "content": main_query})
 
         if tokenize:  # for local models
-            return self._render_chat_template(messages, assistant_prefix)
+            return self._render_chat_template(messages, assistant_prefix, doc)
 
         else:  # for apis
             return messages
 
-    def _render_chat_template(self, messages, assistant_prefix: str | None = None) -> str:
+    def _render_chat_template(self, messages, assistant_prefix: str | None = None, doc: Doc | None = None) -> str:
         """Tokenizer-render chat ``messages`` to a string, opening the assistant turn.
 
         When ``assistant_prefix`` is set it is appended after the generation prompt as
@@ -179,16 +192,11 @@ class PromptManager:
         """
         assert self.tokenizer is not None, "Tokenizer must be set for chat template formatting."
 
-        kwargs = {}
-        if self.enable_thinking is not None:
-            kwargs["enable_thinking"] = self.enable_thinking
-        if self.chat_template_kwargs:
-            kwargs.update(self.chat_template_kwargs)
         rendered = self.tokenizer.apply_chat_template(
             messages,
             tokenize=False,
             add_generation_prompt=True,
-            **kwargs,
+            **self._chat_template_kwargs(doc),
         )
         if assistant_prefix is not None:
             rendered = rendered + assistant_prefix

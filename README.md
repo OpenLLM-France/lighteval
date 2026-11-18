@@ -207,6 +207,7 @@ This fork is maintained by the [OpenLLM-France](https://github.com/OpenLLM-Franc
 - Automatic detection of thinking models and their reasoning tags — `<think>…</think>` and Mistral `[THINK]…[/THINK]`
 - Robust stripping of reasoning traces (including models that prime the opening tag in the generation prompt)
 - Per-generation diagnostics reported automatically on every generative task: `truncation_rate` / `thinking_truncation_rate` (answer or reasoning hit its token budget) and `loop_rate` / `thinking_loop_rate` (answer or reasoning ends in a repetition loop)
+- Thinking is disabled automatically for non-generative tasks (multiple-choice and other loglikelihood/perplexity scoring): the generation prompt no longer primes an open `<think>`, so each candidate is scored as the answer (after an empty `<think></think>`) instead of as the start of the reasoning
 
 ### LLM-as-judge improvements
 - **Run the judge fully offline as a local (vLLM) model** — any Hugging Face model can be the judge, removing the hard dependency on an OpenAI/API judge. This is what makes it possible to use local safety judges such as Llama Guard 4, wildguard or Qwen in the safety benchmarks.
