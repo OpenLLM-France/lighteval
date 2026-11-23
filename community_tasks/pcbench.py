@@ -521,9 +521,9 @@ pcbench_active_task = LightevalTaskConfig(
     few_shots_split=None,
     few_shots_select=None,
     metrics=[pcbench_ill_judge],
-    generation_size=4096,
+    generation_size=8192,
     stop_sequence=[],
-    version=1,
+    version=2,
 )
 
 pcbench_passive_task = LightevalTaskConfig(

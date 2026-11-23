@@ -287,7 +287,7 @@ advbench_task = LightevalTaskConfig(
     evaluation_splits=["train"],
     generation_size=GENERATION_SIZE,
     stop_sequence=[],
-    version="0.1",
+    version="1",
 )
 
 
@@ -365,7 +365,7 @@ hexphi_tasks = [
         evaluation_splits=["train"],
         generation_size=GENERATION_SIZE,
         stop_sequence=[],
-        version="0.1",
+        version="1",
     )
     for suffix in HEXPHI_CATEGORIES
 ]
@@ -428,7 +428,7 @@ harmbench_standard_tasks = [
         evaluation_splits=["train"],
         generation_size=GENERATION_SIZE,
         stop_sequence=[],
-        version="0.1",
+        version="1",
     )
     for category in HARMBENCH_CATEGORIES
 ]
@@ -446,7 +446,7 @@ harmbench_contextual_tasks = [
         evaluation_splits=["train"],
         generation_size=GENERATION_SIZE,
         stop_sequence=[],
-        version="0.1",
+        version="1",
     )
     for category in HARMBENCH_CATEGORIES
 ]
@@ -484,7 +484,7 @@ aya_red_teaming_tasks = [
         evaluation_splits=[split],
         generation_size=GENERATION_SIZE,
         stop_sequence=[],
-        version="0.1",
+        version="1",
     )
     for code, split in AYA_RED_TEAMING_LANGUAGES.items()
 ]
@@ -540,7 +540,7 @@ multilingual_advbench_tasks = [
         evaluation_splits=["train"],
         generation_size=GENERATION_SIZE,
         stop_sequence=[],
-        version="0.1",
+        version="1",
     )
     for lang in MULTILINGUAL_ADVBENCH_LANGUAGES
 ]
@@ -600,7 +600,7 @@ polyguard_tasks = [
         evaluation_splits=["test"],
         generation_size=GENERATION_SIZE,
         stop_sequence=[],
-        version="0.1",
+        version="1",
     )
     for code, language_name in POLYGUARD_LANGUAGES.items()
 ]
@@ -762,9 +762,12 @@ wildjailbreak_task = LightevalTaskConfig(
     metrics=[llm_judge_safety_wildguard],
     hf_avail_splits=["train"],
     evaluation_splits=["train"],
-    generation_size=GENERATION_SIZE,
+    # Raised from the shared GENERATION_SIZE (1024): WildJailbreak responses (refusal
+    # or compliance) plus any reasoning were truncated at 1024 for a sizeable fraction
+    # of samples. Only this task is raised; the other safety tasks keep GENERATION_SIZE.
+    generation_size=2048,
     stop_sequence=[],
-    version="0.1",
+    version="2",
 )
 
 

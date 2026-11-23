@@ -452,9 +452,9 @@ aime25 = LightevalTaskConfig(
     evaluation_splits=["train"],
     few_shots_split=None,
     few_shots_select=None,
-    generation_size=10000,
+    generation_size=16000,
     metrics=[Metrics.pass_at_k_math(sample_params={"k": 1, "n": 1})],
-    version=2,
+    version=3,
 )
 aime25_gpassk = LightevalTaskConfig(
     name="aime25_gpassk",
